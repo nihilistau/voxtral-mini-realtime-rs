@@ -1,0 +1,27 @@
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 1
+
+--- Q4 GGUF (discrete+SP) ---
+2026-05-05T21:23:09.110325Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T21:23:09.275050Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T21:23:09.278443Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T21:23:09.278461Z  INFO Loading audio encoder layers=32
+2026-05-05T21:23:09.814372Z  INFO Loading audio-language adapter
+2026-05-05T21:23:09.825258Z  INFO Loading language model layers=26
+2026-05-05T21:23:11.953798Z  INFO Q4 model loaded
+2026-05-05T21:23:11.955372Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T21:23:11.955749Z  INFO encode_audio: Loaded 6 autotune cached entries
+2026-05-05T21:23:11.963915Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T21:23:11.964270Z  INFO encode_audio: Loaded 9 autotune cached entries
+2026-05-05T21:23:12.263093Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T21:23:12.263508Z  INFO encode_audio: Loaded 55 autotune cached entries
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_2min.wav        discrete+SP      120.40     674.9   17296.3       0.0   61981.8   79952.9  0.664     12.3
+
+JSON results written to benchmarks\zerocopy_discrete_sp_2min.json

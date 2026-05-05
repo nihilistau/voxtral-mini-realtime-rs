@@ -1,0 +1,89 @@
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 1
+
+--- Discrete GPU (RTX) ---
+2026-05-05T19:30:11.119174Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:30:11.282708Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:30:11.284004Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:30:11.284024Z  INFO Loading audio encoder layers=32
+2026-05-05T19:30:11.842791Z  INFO Loading audio-language adapter
+2026-05-05T19:30:11.852686Z  INFO Loading language model layers=26
+2026-05-05T19:30:14.146568Z  INFO Q4 model loaded
+2026-05-05T19:30:14.148052Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:14.148410Z  INFO encode_audio: Loaded 2 autotune cached entries
+2026-05-05T19:30:14.248868Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:14.249321Z  INFO encode_audio: Loaded 8 autotune cached entries
+2026-05-05T19:30:14.811340Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:14.811744Z  INFO encode_audio: Loaded 16 autotune cached entries
+  Iteration 1 complete
+
+--- Discrete GPU + Shannon-Prime ---
+2026-05-05T19:30:20.380805Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:30:20.380828Z  INFO Loading audio encoder layers=32
+2026-05-05T19:30:20.896934Z  INFO Loading audio-language adapter
+2026-05-05T19:30:20.907005Z  INFO Loading language model layers=26
+2026-05-05T19:30:22.930286Z  INFO Q4 model loaded
+  Iteration 1 complete
+
+--- Integrated GPU + Shannon-Prime (compact) ---
+2026-05-05T19:30:27.836313Z  INFO Using adapter AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T19:30:27.859335Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | VULKAN_EXTERNAL_MEMORY_WIN32), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TEXTURE_COMPRESSION_ETC2 | TEXTURE_COMPRESSION_ASTC | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | SHADER_F16 | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T19:30:27.859990Z  INFO Loading Q4 Voxtral model from GGUF (deferred embedding) version=2 tensors=711
+2026-05-05T19:30:27.860005Z  INFO Loading audio encoder layers=32
+2026-05-05T19:30:28.410377Z  INFO Loading audio-language adapter
+2026-05-05T19:30:28.499511Z  INFO Loading decoder layers layers=26
+2026-05-05T19:30:30.004016Z  INFO Q4 model loaded (token embeddings deferred)
+2026-05-05T19:30:30.004060Z  INFO Finalizing model with Q4 embeddings (compact mode)
+2026-05-05T19:30:30.079528Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:30.079887Z  INFO encode_audio: Loaded 2 autotune cached entries
+2026-05-05T19:30:30.183088Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:30.183433Z  INFO encode_audio: Loaded 8 autotune cached entries
+2026-05-05T19:30:31.116308Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:30:31.116704Z  INFO encode_audio: Loaded 14 autotune cached entries
+  Iteration 1 complete
+
+--- Hybrid (RTX encoder + iGPU decoder) ---
+2026-05-05T19:31:20.966839Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T19:31:20.966858Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T19:31:21.441772Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T19:31:21.528363Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T19:31:23.051395Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+  Iteration 1 complete
+
+--- Hybrid + Pipelined (600-frame chunks) ---
+2026-05-05T19:31:48.335419Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T19:31:48.335445Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T19:31:48.825025Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T19:31:48.912717Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T19:31:50.568266Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+2026-05-05T19:32:15.745588Z  INFO transcribe_pipelined{chunks=1}:chunk{idx=0 total=1}: Chunk decoded chunk=1 total=1 tokens=30
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_had_lamb.wav    discrete           3.44     371.7    2098.9       0.0    4111.1    6581.7  1.913      7.3
+mary_had_lamb.wav    discrete+SP        3.44      23.6    1434.9       0.0    3423.5    4881.9  1.419      8.8
+mary_had_lamb.wav    integrated+SP      3.44      70.7   26756.1       0.0   24101.1   50927.8 14.805      1.2
+mary_had_lamb.wav    hybrid             3.44      22.9    1522.9     339.3   23389.8   25275.0  7.347      1.3
+mary_had_lamb.wav    hybrid+pipe        3.44      23.2    1181.1       0.3   23638.4   25200.5  7.326      1.3
+
+=== RTF Comparison ===
+
+Mode                  RTF   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    Tok/s  SP
+------------------------------------------------------------------------------------------
+discrete           1.9133    2098.9       0.0    4111.1    6581.7      7.3  no
+discrete+SP        1.4192    1434.9       0.0    3423.5    4881.9      8.8 yes
+integrated+SP     14.8046   26756.1       0.0   24101.1   50927.8      1.2 yes
+hybrid             7.3474    1522.9     339.3   23389.8   25275.0      1.3 yes
+hybrid+pipe        7.3257    1181.1       0.3   23638.4   25200.5      1.3 yes
+
+Relative to discrete:
+  discrete+SP — 1.35x overall, enc 0.68x, dec 0.83x
+  integrated+SP — 0.13x overall, enc 12.75x, dec 5.86x
+  hybrid — 0.26x overall, enc 0.73x, dec 5.69x
+  hybrid+pipe — 0.26x overall, enc 0.56x, dec 5.75x
+
+JSON results written to benchmarks\rtf_comparison.json

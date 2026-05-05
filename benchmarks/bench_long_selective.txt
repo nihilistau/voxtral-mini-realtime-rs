@@ -1,0 +1,189 @@
+
+C:\Users\Knack>cd /d D:\F\shannon-prime-repos\voxtral-mini-realtime-rs 
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>echo === DISCRETE === 
+=== DISCRETE ===
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>D:\F\shannon-prime-repos\voxtral-mini-realtime-rs\target\release\e2e-bench.exe --gguf models\voxtral-q4.gguf --audio test_data\mary_long.wav --audio test_data\mary_2min.wav --tokenizer models\tekken.json --iterations 1 --warmup 0 --device discrete --json-output benchmarks\long_discrete.json 
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 2
+
+--- Q4 GGUF (discrete) ---
+2026-05-05T19:46:18.169931Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:46:18.313978Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:46:18.315257Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:46:18.315273Z  INFO Loading audio encoder layers=32
+2026-05-05T19:46:18.844359Z  INFO Loading audio-language adapter
+2026-05-05T19:46:18.854714Z  INFO Loading language model layers=26
+2026-05-05T19:46:21.006872Z  INFO Q4 model loaded
+2026-05-05T19:46:21.008411Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:46:21.008774Z  INFO encode_audio: Loaded 6 autotune cached entries
+2026-05-05T19:46:21.040180Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:46:21.040570Z  INFO encode_audio: Loaded 9 autotune cached entries
+2026-05-05T19:46:21.364611Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:46:21.365074Z  INFO encode_audio: Loaded 55 autotune cached entries
+2026-05-05T19:46:42.507634Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:46:42.507661Z  INFO Loading audio encoder layers=32
+2026-05-05T19:46:43.029363Z  INFO Loading audio-language adapter
+2026-05-05T19:46:43.039843Z  INFO Loading language model layers=26
+2026-05-05T19:46:45.076974Z  INFO Q4 model loaded
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_long.wav        discrete          34.40     419.5    6120.5       0.0   15053.2   21593.2  0.628     14.8
+mary_2min.wav        discrete         120.40     326.3   19137.2       0.0   47078.7   66542.2  0.553     16.2
+
+JSON results written to benchmarks\long_discrete.json
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>echo === DISCRETE+SP === 
+=== DISCRETE+SP ===
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>D:\F\shannon-prime-repos\voxtral-mini-realtime-rs\target\release\e2e-bench.exe --gguf models\voxtral-q4.gguf --audio test_data\mary_long.wav --audio test_data\mary_2min.wav --tokenizer models\tekken.json --iterations 1 --warmup 0 --device discrete --shannon-prime --json-output benchmarks\long_discrete_sp.json 
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 2
+
+--- Q4 GGUF (discrete+SP) ---
+2026-05-05T19:47:51.790400Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:47:51.915116Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:47:51.916380Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:47:51.916394Z  INFO Loading audio encoder layers=32
+2026-05-05T19:47:52.457926Z  INFO Loading audio-language adapter
+2026-05-05T19:47:52.468249Z  INFO Loading language model layers=26
+2026-05-05T19:47:54.521401Z  INFO Q4 model loaded
+2026-05-05T19:47:54.523071Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:47:54.523457Z  INFO encode_audio: Loaded 6 autotune cached entries
+2026-05-05T19:47:54.562468Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:47:54.562863Z  INFO encode_audio: Loaded 9 autotune cached entries
+2026-05-05T19:47:54.861791Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:47:54.862217Z  INFO encode_audio: Loaded 55 autotune cached entries
+2026-05-05T19:48:27.833796Z  INFO Loading Q4 Voxtral model from GGUF version=2 tensors=711
+2026-05-05T19:48:27.833824Z  INFO Loading audio encoder layers=32
+2026-05-05T19:48:28.386228Z  INFO Loading audio-language adapter
+2026-05-05T19:48:28.396613Z  INFO Loading language model layers=26
+2026-05-05T19:48:30.515211Z  INFO Q4 model loaded
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_long.wav        discrete+SP       34.40     402.8    5954.1       0.0   27013.6   33370.5  0.970      8.3
+mary_2min.wav        discrete+SP      120.40     344.0   18728.1       0.0  147752.7  166824.7  1.386      5.2
+
+JSON results written to benchmarks\long_discrete_sp.json
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>echo === HYBRID === 
+=== HYBRID ===
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>D:\F\shannon-prime-repos\voxtral-mini-realtime-rs\target\release\e2e-bench.exe --gguf models\voxtral-q4.gguf --audio test_data\mary_long.wav --audio test_data\mary_2min.wav --tokenizer models\tekken.json --iterations 1 --warmup 0 --hybrid --json-output benchmarks\long_hybrid.json 
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 2
+
+--- Hybrid (RTX + iGPU) ---
+2026-05-05T19:51:17.700422Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:51:17.820929Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T19:51:17.822163Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T19:51:17.822180Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T19:51:18.357226Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T19:51:18.445535Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T19:51:18.493085Z  INFO Using adapter AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T19:51:18.516333Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | VULKAN_EXTERNAL_MEMORY_WIN32), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TEXTURE_COMPRESSION_ETC2 | TEXTURE_COMPRESSION_ASTC | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | SHADER_F16 | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T19:51:20.089077Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+2026-05-05T19:51:20.091376Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:51:20.091856Z  INFO encode_audio: Loaded 6 autotune cached entries
+2026-05-05T19:51:20.125360Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:51:20.125754Z  INFO encode_audio: Loaded 9 autotune cached entries
+2026-05-05T19:51:20.141348Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T19:51:20.141784Z  INFO encode_audio: Loaded 55 autotune cached entries
+2026-05-05T19:51:25.747476Z  INFO Load autotune cache ...
+2026-05-05T19:51:25.747893Z  INFO Loaded 9 autotune cached entries
+2026-05-05T19:51:25.898282Z  INFO Load autotune cache ...
+2026-05-05T19:51:25.898676Z  INFO Loaded 28 autotune cached entries
+2026-05-05T19:52:40.924924Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 256, lhs_pow2_factor: 4, lhs_stride_factor: 8, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:09.577090Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 256, lhs_pow2_factor: 4, lhs_stride_factor: 10, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:10.061913Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 512, k: 128, lhs_pow2_factor: 0, lhs_stride_factor: 0, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: HighlyPermuted, matrix_layout_rhs: MildlyPermuted { transposed: true, batch_swap: false } }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:10.133607Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 0, lhs_stride_factor: 2, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:10.667605Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 1, lhs_stride_factor: 3, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:11.670829Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 2, lhs_stride_factor: 4, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:53:12.504807Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T19:53:12.504832Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T19:53:12.978801Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T19:53:13.064844Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T19:53:14.573141Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+2026-05-05T19:55:19.259877Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 3, lhs_stride_factor: 5, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:55:23.048835Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 4, lhs_stride_factor: 6, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:55:30.688781Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 4, lhs_stride_factor: 7, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:55:46.370036Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 4, lhs_stride_factor: 8, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:56:19.044033Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 4, lhs_stride_factor: 9, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Small, kind: VecMat }
+2026-05-05T19:57:29.598436Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 512, k: 128, lhs_pow2_factor: 0, lhs_stride_factor: 0, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: HighlyPermuted, matrix_layout_rhs: MildlyPermuted { transposed: true, batch_swap: false } }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:29.636192Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 512, lhs_pow2_factor: 4, lhs_stride_factor: 10, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:30.217648Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 1024, k: 128, lhs_pow2_factor: 0, lhs_stride_factor: 0, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: HighlyPermuted, matrix_layout_rhs: MildlyPermuted { transposed: true, batch_swap: false } }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:30.236173Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 0, lhs_stride_factor: 2, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:30.843000Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 1, lhs_stride_factor: 3, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:32.039014Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 2, lhs_stride_factor: 4, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:34.376642Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 3, lhs_stride_factor: 5, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:39.163671Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 4, lhs_stride_factor: 6, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:57:48.583861Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 4, lhs_stride_factor: 7, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:58:07.862151Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 4, lhs_stride_factor: 8, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T19:58:48.025259Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 4, lhs_stride_factor: 9, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+2026-05-05T20:00:14.308341Z  INFO Tuning MatmulAutotuneKey - Definition: MatmulProblemDefinition { m: 1, n: 128, k: 1024, lhs_pow2_factor: 4, lhs_stride_factor: 10, rhs_pow2_factor: 4, rhs_stride_factor: 9, elem_lhs: Scalar(Float(F32)), elem_rhs: Scalar(Float(F32)), elem_out: Scalar(Float(F32)), matrix_layout_lhs: Contiguous, matrix_layout_rhs: Contiguous }, Analysis: MatmulAutotuneAnalysis { scale_global: Medium, kind: VecMat }
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_long.wav        hybrid            34.40     422.6    5279.6     356.7  106444.3  112503.2  3.270      2.1
+mary_2min.wav        hybrid           120.40     326.3   17777.6     296.6  423914.3  442314.9  3.674      1.8
+
+JSON results written to benchmarks\long_hybrid.json
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>echo === HYBRID+PIPELINED === 
+=== HYBRID+PIPELINED ===
+
+D:\F\shannon-prime-repos\voxtral-mini-realtime-rs>D:\F\shannon-prime-repos\voxtral-mini-realtime-rs\target\release\e2e-bench.exe --gguf models\voxtral-q4.gguf --audio test_data\mary_long.wav --audio test_data\mary_2min.wav --tokenizer models\tekken.json --iterations 1 --warmup 0 --hybrid --pipelined --json-output benchmarks\long_hybrid_pipe.json 
+Voxtral E2E Benchmark
+  Model: Q4 GGUF
+  Delay: 6 tokens (480ms)
+  Warmup: 0, Iterations: 1
+  Audio files: 2
+
+--- Hybrid (RTX + iGPU) ---
+2026-05-05T20:00:37.386798Z  INFO Using adapter AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T20:00:37.512402Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(SHADER_FLOAT32_ATOMIC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE | EXPERIMENTAL_RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SHADER_INT64 | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | SHADER_INT64_ATOMIC_MIN_MAX | SHADER_INT64_ATOMIC_ALL_OPS | VULKAN_EXTERNAL_MEMORY_WIN32 | TEXTURE_INT64_ATOMIC | EXPERIMENTAL_MESH_SHADER | EXPERIMENTAL_RAY_HIT_VERTEX_RETURN | EXPERIMENTAL_MESH_SHADER_MULTIVIEW | EXTENDED_ACCELERATION_STRUCTURE_VERTEX_FORMATS), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "NVIDIA GeForce RTX 2060", vendor: 4318, device: 7939, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "596.21", backend: Vulkan }
+2026-05-05T20:00:37.513703Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T20:00:37.513721Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T20:00:38.044458Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T20:00:38.134023Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T20:00:38.181722Z  INFO Using adapter AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T20:00:38.205090Z  INFO Created wgpu compute server on device Device { inner: Core(CoreDevice { context: ContextWgpuCore { type: "Native" }, id: Id(0,1), error_sink: Mutex { data: ErrorSink }, features: Features { features_wgpu: FeaturesWGPU(TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS | TIMESTAMP_QUERY_INSIDE_PASSES | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | TEXTURE_ATOMIC | TEXTURE_FORMAT_NV12 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | SHADER_EARLY_DEPTH_TEST | SUBGROUP | SUBGROUP_VERTEX | SUBGROUP_BARRIER | PIPELINE_CACHE | VULKAN_EXTERNAL_MEMORY_WIN32), features_webgpu: FeaturesWebGPU(DEPTH_CLIP_CONTROL | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_COMPRESSION_BC_SLICED_3D | TEXTURE_COMPRESSION_ETC2 | TEXTURE_COMPRESSION_ASTC | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | SHADER_F16 | RG11B10UFLOAT_RENDERABLE | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | DUAL_SOURCE_BLENDING | CLIP_DISTANCES) } }) } => AdapterInfo { name: "Intel(R) UHD Graphics", vendor: 32902, device: 39520, device_type: IntegratedGpu, driver: "Intel Corporation", driver_info: "Intel driver", backend: Vulkan }
+2026-05-05T20:00:39.782710Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+2026-05-05T20:00:39.784885Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T20:00:39.785347Z  INFO encode_audio: Loaded 6 autotune cached entries
+2026-05-05T20:00:39.819446Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T20:00:39.819912Z  INFO encode_audio: Loaded 9 autotune cached entries
+2026-05-05T20:00:39.864552Z  INFO encode_audio: Load autotune cache ...
+2026-05-05T20:00:39.865000Z  INFO encode_audio: Loaded 55 autotune cached entries
+2026-05-05T20:00:45.478662Z  INFO Load autotune cache ...
+2026-05-05T20:00:45.479490Z  INFO Loaded 9 autotune cached entries
+2026-05-05T20:00:45.629859Z  INFO Load autotune cache ...
+2026-05-05T20:00:45.630248Z  INFO Loaded 51 autotune cached entries
+2026-05-05T20:02:32.168333Z  INFO Loading Q4 Voxtral model in hybrid mode version=2 tensors=711
+2026-05-05T20:02:32.168362Z  INFO Loading audio encoder on encoder device layers=32
+2026-05-05T20:02:32.646296Z  INFO Loading audio-language adapter on encoder device
+2026-05-05T20:02:32.733373Z  INFO Loading decoder on decoder device layers=26
+2026-05-05T20:02:34.253417Z  INFO Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)
+  Iteration 1 complete
+
+Audio                Mode            Dur (s)   Pre(ms)   Enc(ms)  Xfer(ms)   Dec(ms) Total(ms)    RTF    Tok/s
+----------------------------------------------------------------------------------------------------------------------------------
+mary_long.wav        hybrid            34.40     391.0    5355.7     319.4  106376.7  112442.8  3.269      2.1
+mary_2min.wav        hybrid           120.40     324.9   17769.6     323.5  424308.9  442727.0  3.677      1.8
+
+JSON results written to benchmarks\long_hybrid_pipe.json

@@ -1,0 +1,17 @@
+{
+  "hardware": {
+    "discrete_gpu": "NVIDIA GeForce RTX 2060 (6 GB)",
+    "integrated_gpu": "Intel UHD Graphics",
+    "cpu": "Intel Core i9-11900KB",
+    "backend": "Vulkan"
+  },
+  "model": "Voxtral Mini 4B Q4_0 GGUF (~2.5 GB)",
+  "date": "2026-05-06",
+  "summary": [
+    {"mode": "discrete",       "audio_3s_rtf": 1.91, "audio_34s_rtf": 0.63, "audio_120s_rtf": 0.55},
+    {"mode": "discrete+SP",    "audio_3s_rtf": 1.42, "audio_34s_rtf": 0.97, "audio_120s_rtf": 1.39},
+    {"mode": "integrated+SP",  "audio_3s_rtf": 14.80, "audio_34s_rtf": null, "audio_120s_rtf": null},
+    {"mode": "hybrid",         "audio_3s_rtf": 7.35, "audio_34s_rtf": 3.27, "audio_120s_rtf": 3.67},
+    {"mode": "hybrid+pipe",    "audio_3s_rtf": 7.33, "audio_34s_rtf": 3.27, "audio_120s_rtf": 3.68}
+  ]
+}

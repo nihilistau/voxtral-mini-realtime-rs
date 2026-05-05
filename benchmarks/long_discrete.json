@@ -1,0 +1,37 @@
+{
+  "results": [
+    {
+      "audio_file": "test_data\\mary_long.wav",
+      "mode": "discrete",
+      "audio_duration_secs": 34.4,
+      "preprocess_ms": 419.5016,
+      "encode_ms": 6120.483700000001,
+      "transfer_ms": 0.0,
+      "decode_ms": 15053.2171,
+      "total_ms": 21593.202400000002,
+      "rtf": 0.6277093442497546,
+      "decode_tokens": 223,
+      "tokens_per_sec": 14.814109071741216,
+      "peak_memory_kb": null,
+      "shannon_prime": false
+    },
+    {
+      "audio_file": "test_data\\mary_2min.wav",
+      "mode": "discrete",
+      "audio_duration_secs": 120.4,
+      "preprocess_ms": 326.3044,
+      "encode_ms": 19137.1639,
+      "transfer_ms": 0.0,
+      "decode_ms": 47078.6906,
+      "total_ms": 66542.15890000001,
+      "rtf": 0.5526757313678053,
+      "decode_tokens": 761,
+      "tokens_per_sec": 16.16442577950543,
+      "peak_memory_kb": null,
+      "shannon_prime": false
+    }
+  ],
+  "iterations": 1,
+  "warmup": 0,
+  "delay_tokens": 6
+}

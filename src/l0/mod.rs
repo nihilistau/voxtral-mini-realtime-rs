@@ -35,14 +35,18 @@
 #[allow(non_snake_case)]
 pub mod ocl_compile;
 
+pub mod decode;
 pub mod device;
 pub mod kernel;
+pub mod q4_decoder;
 pub mod spirv_gen;
 pub mod usm;
 
+pub use decode::{L0DecodeConfig, L0DecodeContext};
 pub use device::{L0Context, L0Device};
 pub use kernel::{L0Kernel, L0Module};
 pub use ocl_compile::OclCompiler;
+pub use q4_decoder::{DecoderConfig, L0Decoder, Q4DecoderWeights, Q4LayerWeights};
 pub use usm::{UsmAllocation, UsmAllocator};
 
 use std::sync::Once;

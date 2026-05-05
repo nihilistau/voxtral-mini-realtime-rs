@@ -154,6 +154,51 @@ impl L0DecodeContext {
         Ok(())
     }
 
+    /// Dispatch multiple Q4 matmuls in a single command list (one fence sync).
+    ///
+    /// Each entry: (weights_ptr, input_ptr, output_ptr, B, M, K, N)
+    /// All buffers must be USM. The GPU executes them sequentially in one submission.
+    pub fn q4_matmul_batch(
+        &self,
+        ops: &[(* const u8, *const f32, *mut f32, u32, u32, u32, u32)],
+    ) -> Result<()> {
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        let cmd_list = self.ctx.create_command_list()?;
+
+        for &(w_ptr, i_ptr, o_ptr, b, m, k, n) in ops {
+            let blocks_per_row = k / 32;
+            let kernel = self.q4_matmul_module.create_kernel("q4_matmul")?;
+
+            kernel.set_arg_ptr(0, w_ptr)?;
+            kernel.set_arg_ptr(1, i_ptr)?;
+            kernel.set_arg_ptr(2, o_ptr)?;
+            kernel.set_arg_scalar(3, &b)?;
+            kernel.set_arg_scalar(4, &m)?;
+            kernel.set_arg_scalar(5, &k)?;
+            kernel.set_arg_scalar(6, &n)?;
+            kernel.set_arg_scalar(7, &blocks_per_row)?;
+            kernel.set_group_size(16, 16, 1)?;
+
+            let groups_x = (n + 15) / 16;
+            let groups_y = (b * m + 15) / 16;
+            kernel.append_to_command_list(cmd_list, groups_x, groups_y, 1)?;
+        }
+
+        // Barrier + close + submit + sync
+        unsafe {
+            use super::sys;
+            use std::ptr;
+            sys::zeCommandListAppendBarrier(cmd_list, ptr::null_mut(), 0, ptr::null());
+            sys::zeCommandListClose(cmd_list);
+        }
+        self.ctx.submit_and_sync(cmd_list)?;
+        unsafe { super::sys::zeCommandListDestroy(cmd_list); }
+        Ok(())
+    }
+
     /// Reset KV cache for a new sequence.
     pub fn reset(&mut self) {
         self.kv_cache.reset();

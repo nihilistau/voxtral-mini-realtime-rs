@@ -123,6 +123,11 @@ name = "l0-bench"
 path = "src/bin/l0_bench.rs"
 required-features = ["l0"]
 
+[[bin]]
+name = "l0-decode"
+path = "src/bin/l0_decode.rs"
+required-features = ["l0", "wgpu", "cli"]
+
 [[bench]]
 name = "audio"
 harness = false

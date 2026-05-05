@@ -84,10 +84,34 @@ The same `*mut f32` pointer is used by CPU (VHT2) and GPU (attention) with zero 
 **SPIR-V issue solved:** naga outputs Vulkan-flavor SPIR-V (GLSL.std.450) which Intel IGC rejects.
 Solution: compile OpenCL C via `OpenCL.dll` (always present), extract native binary, load via `ZE_MODULE_FORMAT_NATIVE`.
 
+## What's Done (Session 2026-05-06 pt. 6 — Full 26-Layer L0 Decoder)
+
+**Branch: `svm-zero-copy`** — extends L0 work with complete decoder.
+
+1. **Full 26-layer decoder** — `src/l0/q4_decoder.rs` (832 lines) implements the entire autoregressive decode loop bypassing Burn/wgpu entirely
+2. **Per-layer forward pass** — RMSNorm → Q/K/V proj → RoPE → KV cache (VHT2) → CPU GQA attention → O proj → residual → FFN (gate/up/SwiGLU/down) → residual
+3. **Batched GPU dispatch** — `q4_matmul_batch()` in `decode.rs` packs multiple kernel launches into one command list with single fence sync (4 fences per layer instead of 6)
+4. **Multiplexed KV cache** — 26×8=208 effective KV heads in single USM allocation (1248 MiB)
+5. **GGUF → USM loader** — `load_decoder_weights_from_gguf()` reads Q4 bytes directly into USM shared memory
+6. **E2E benchmark binary** — `src/bin/l0_decode.rs` with clap CLI, per-token timing, RTF reporting
+7. **VHT2 pad-to-PoT workaround** — head_dim=96 (3072/32) padded to 128 for transform, truncated back
+8. **CPU GQA attention** — handles 32Q/8KV grouped query attention on CPU (memory-bound for single-token decode)
+
+**Benchmark results (release build, Intel UHD 770, 32 EUs):**
+- **229 ms/token steady-state**
+- **2.86 RTF** (real-time factor)
+- **5.2× improvement** over wgpu iGPU baseline (14.80 RTF)
+- Model load: 1.5–1.7s into USM
+- Init (L0 context + kernel compile + KV alloc): ~2s
+
+**Bottleneck identified:** 156× `zeKernelCreate` per token (6 per layer × 26 layers). Pre-creating and reusing kernel objects is the biggest remaining perf opportunity.
+
+**VHT2 composite-order deferred:** User confirmed VHT2 should handle non-PoT natively via mixed-radix decomposition (96 = 2⁵×3), but said to "wait and target as optimization."
+
 ## What's Next
 
-1. **Optimized benchmark** — release build with AVX-512 VHT2 for real throughput numbers
-2. **Wire L0 decode into full model** — replace wgpu iGPU path with L0 for 26-layer decode
+1. **Pre-create kernel pool** — avoid 156× `zeKernelCreate` per token (estimated 30-50% speedup)
+2. **Composite-order VHT2** — handle head_dim=96 natively without pad-to-PoT
 3. **Optane M10 mmap integration** — arriving 2026-05-07, KV cache spill tier for large contexts
 4. **Tag v0.4.0** — Shannon-Prime SVM engine release
 
@@ -117,7 +141,9 @@ Solution: compile OpenCL C via `OpenCL.dll` (always present), extract native bin
 | `src/l0/kernel.rs` | SPIR-V/native module loading, kernel dispatch |
 | `src/bin/l0_smoke.rs` | L0 pipeline smoke test |
 | `src/bin/l0_q4_test.rs` | Q4 matmul correctness test on L0 |
+| `src/l0/q4_decoder.rs` | Full 26-layer L0 decoder (DecoderConfig, L0Decoder, weights loader) |
 | `src/bin/l0_bench.rs` | L0 zero-copy decode benchmark |
+| `src/bin/l0_decode.rs` | Full 26-layer decode benchmark with GGUF loading |
 | `benchmarks/BENCHMARK_RESULTS.md` | Full benchmark analysis and results |
 | `docs/SETUP.md` | Installation and build guide |
 | `docs/USAGE.md` | CLI and API usage reference |
@@ -144,7 +170,8 @@ cargo run --features "wgpu,cli,hub" --bin voxtral -- speak --text "Hello" --gguf
 # L0 (Intel Level Zero backend)
 cargo run --features "wgpu,cli,hub,l0" --bin l0-smoke      # validate L0 pipeline
 cargo run --features "wgpu,cli,hub,l0" --bin l0-q4-test    # Q4 matmul correctness
-cargo run --release --features "wgpu,cli,hub,l0" --bin l0-bench  # benchmark
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-bench  # single-layer benchmark
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- --gguf models/voxtral-q4.gguf --tokens 20  # full 26-layer decode
 ```
 
 ## Model Weights (Local)

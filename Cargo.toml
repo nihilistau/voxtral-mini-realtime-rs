@@ -113,6 +113,11 @@ name = "l0-smoke"
 path = "src/bin/l0_smoke.rs"
 required-features = ["l0"]
 
+[[bin]]
+name = "l0-q4-test"
+path = "src/bin/l0_q4_test.rs"
+required-features = ["l0"]
+
 [[bench]]
 name = "audio"
 harness = false

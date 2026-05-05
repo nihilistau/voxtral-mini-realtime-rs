@@ -180,18 +180,8 @@ __kernel void vecadd(
 ///
 /// Q4_0 format: each block = 2 bytes scale (fp16) + 16 bytes data (32 nibbles)
 /// Block size = 18 bytes, encodes 32 elements.
+/// Nibble packing: byte[j] = lower_nibble[j] | (upper_nibble[j+16] << 4) for j in 0..16
 pub const OPENCL_Q4_MATMUL: &str = r#"
-// Read unaligned u32 from weight buffer (byte-addressable via char*)
-inline uint read_u32_unaligned(__global const uchar* weights, uint byte_offset) {
-    return *((__global const uint*)(weights + byte_offset));
-}
-
-// Read fp16 scale from block start
-inline float read_f16_scale(__global const uchar* weights, uint block_byte_offset) {
-    ushort bits = *((__global const ushort*)(weights + block_byte_offset));
-    return vload_half(0, (__global const half*)(weights + block_byte_offset));
-}
-
 __kernel void q4_matmul(
     __global const uchar* weights,    // Q4_0 packed weights [N, K/32 blocks × 18 bytes]
     __global const float* input,      // Input activations [B, M, K]
@@ -215,50 +205,36 @@ __kernel void q4_matmul(
     for (uint blk = 0; blk < blocks_per_row; blk++) {
         uint global_block = n * blocks_per_row + blk;
         uint block_byte = global_block * 18;
-        float scale = read_f16_scale(weights, block_byte);
+
+        // Read fp16 scale (2 bytes at block start) - byte-level for alignment safety
+        ushort scale_bits = (ushort)weights[block_byte] | ((ushort)weights[block_byte + 1] << 8);
+        // Manual fp16 → f32 decode (avoids vload_half alignment issues)
+        uint sign = (scale_bits >> 15) & 1;
+        uint exp = (scale_bits >> 10) & 0x1F;
+        uint mant = scale_bits & 0x3FF;
+        float scale;
+        if (exp == 0) {
+            scale = ldexp((float)mant, -24);  // subnormal
+        } else if (exp == 31) {
+            scale = (mant == 0) ? INFINITY : NAN;
+        } else {
+            scale = ldexp((float)(mant + 1024), (int)exp - 25);
+        }
+        if (sign) scale = -scale;
+
         uint k_base = blk * 32;
-
-        // Process 16 bytes = 32 nibbles = 32 weight elements
         uint data_start = block_byte + 2;
-        for (uint wi = 0; wi < 4; wi++) {
-            uint packed = read_u32_unaligned(weights, data_start + wi * 4);
-            uint b0 = packed & 0xFF;
-            uint b1 = (packed >> 8) & 0xFF;
-            uint b2 = (packed >> 16) & 0xFF;
-            uint b3 = (packed >> 24) & 0xFF;
 
-            uint base_i = wi * 4;
+        // Process 16 data bytes = 32 nibbles
+        // Packing: byte[j] = nibble[j] (low) | nibble[j+16] (high) for j in 0..16
+        for (uint j = 0; j < 16; j++) {
+            uchar byte_val = weights[data_start + j];
+            float w_lo = ((float)(byte_val & 0xF) - 8.0f) * scale;
+            float w_hi = ((float)((byte_val >> 4) & 0xF) - 8.0f) * scale;
+
             uint k_off = input_base + k_base;
-
-            // Lower nibbles
-            float4 w_lo = (float4)(
-                (float)(b0 & 0xF) - 8.0f,
-                (float)(b1 & 0xF) - 8.0f,
-                (float)(b2 & 0xF) - 8.0f,
-                (float)(b3 & 0xF) - 8.0f
-            ) * scale;
-            float4 in_lo = (float4)(
-                input[k_off + base_i],
-                input[k_off + base_i + 1],
-                input[k_off + base_i + 2],
-                input[k_off + base_i + 3]
-            );
-            acc += dot(w_lo, in_lo);
-
-            // Upper nibbles
-            float4 w_hi = (float4)(
-                (float)((b0 >> 4) & 0xF) - 8.0f,
-                (float)((b1 >> 4) & 0xF) - 8.0f,
-                (float)((b2 >> 4) & 0xF) - 8.0f,
-                (float)((b3 >> 4) & 0xF) - 8.0f
-            ) * scale;
-            float4 in_hi = (float4)(
-                input[k_off + 16 + base_i],
-                input[k_off + 16 + base_i + 1],
-                input[k_off + 16 + base_i + 2],
-                input[k_off + 16 + base_i + 3]
-            );
-            acc += dot(w_hi, in_hi);
+            acc += w_lo * input[k_off + j];
+            acc += w_hi * input[k_off + j + 16];
         }
     }
 

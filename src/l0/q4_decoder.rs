@@ -691,34 +691,17 @@ fn load_f32_tensor<R: std::io::Read + std::io::Seek>(
 }
 
 // ───────────────────────────────────────────────────────────────────
-// VHT2 Helper (handles non-power-of-2 via zero-padding)
+// VHT2 Helper
 // ───────────────────────────────────────────────────────────────────
 
-/// Apply VHT2 compress+decompress to a KV slice, handling non-PoT dimensions.
+/// Apply VHT2 compress+decompress to a KV slice.
 ///
-/// For power-of-2 lengths: operates in-place directly.
-/// For non-PoT (e.g. 96): pads to next PoT (128), transforms, truncates back.
-/// The padding approach preserves the energy concentration property.
+/// Supports any dimension that factors into 2s and 3s (including 96 = 2^5 × 3).
+/// VHT2 now handles composite orders natively via mixed-radix butterflies.
+#[inline]
 fn vht2_compress_slice(slice: &mut [f32], band_config: &BandConfig) {
-    let n = slice.len();
-    if n.is_power_of_two() {
-        // Fast path: in-place
-        compress_kv_vector(slice, band_config);
-        decompress_kv_vector(slice);
-    } else {
-        // Pad to next power of 2
-        let padded_len = n.next_power_of_two();
-        let mut padded = vec![0.0f32; padded_len];
-        padded[..n].copy_from_slice(slice);
-
-        // Create a band config for the padded dimension
-        let padded_config = BandConfig::default_k(padded_len);
-        compress_kv_vector(&mut padded, &padded_config);
-        decompress_kv_vector(&mut padded);
-
-        // Copy back (truncating padding)
-        slice.copy_from_slice(&padded[..n]);
-    }
+    compress_kv_vector(slice, band_config);
+    decompress_kv_vector(slice);
 }
 
 // ───────────────────────────────────────────────────────────────────

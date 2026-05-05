@@ -209,41 +209,29 @@
             color: var(--comment);
         }
 
-        /* mic visualizer */
-        .mic-viz {
-            height: 32px;
+        /* waveform visualizer */
+        .waveform-container {
+            height: 80px;
             background: var(--bg);
             border: 1px solid var(--border);
             border-radius: 3px;
             margin-bottom: 0.75rem;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
+            position: relative;
+            overflow: hidden;
         }
-        .mic-viz.active { display: flex; }
-
-        .mic-viz .bars {
-            display: flex;
-            gap: 2px;
-            height: 20px;
-            align-items: flex-end;
+        .waveform-container canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
-        .mic-viz .bar {
-            width: 3px;
-            background: var(--orange);
-            border-radius: 1px;
-            animation: bounce 0.5s ease-in-out infinite;
+        .waveform-label {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            font-size: 0.65rem;
+            color: var(--muted);
+            pointer-events: none;
         }
-        @keyframes bounce {
-            0%, 100% { height: 15%; }
-            50% { height: 100%; }
-        }
-        .mic-viz .bar:nth-child(1) { animation-delay: 0s; }
-        .mic-viz .bar:nth-child(2) { animation-delay: 0.1s; }
-        .mic-viz .bar:nth-child(3) { animation-delay: 0.15s; }
-        .mic-viz .bar:nth-child(4) { animation-delay: 0.25s; }
-        .mic-viz .bar:nth-child(5) { animation-delay: 0.35s; }
 
         .timer {
             font-size: 0.85rem;
@@ -315,15 +303,9 @@ Weights are cached in the browser after first download.</div>
         <section>
             <h2>audio</h2>
 
-            <div class="mic-viz" id="mic-viz">
-                <div class="bars">
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                </div>
-                <span class="timer" id="rec-timer">0:00</span>
+            <div class="waveform-container">
+                <canvas id="waveform-canvas"></canvas>
+                <span class="waveform-label" id="waveform-label"></span>
             </div>
 
             <div class="controls">
@@ -366,12 +348,25 @@ Weights are cached in the browser after first download.</div>
 
     <script type="module">
         import { VoxtralClient } from './voxtral-client.js';
+        import { WaveformRenderer } from './waveform.js';
 
         if (!navigator.gpu) {
             document.getElementById('webgpu-warning').style.display = 'block';
         }
 
         const client = new VoxtralClient();
+        const waveform = new WaveformRenderer(
+            document.getElementById('waveform-canvas'),
+            { durationSecs: 3, sampleRate: 16000 }
+        );
+        waveform.start();
+
+        const waveformLabel = document.getElementById('waveform-label');
+
+        // Wire audio chunks to waveform
+        client.onAudioChunk = (samples) => {
+            waveform.pushSamples(samples);
+        };
 
         const $ = id => document.getElementById(id);
         const statusDot = $('status-dot');
@@ -387,12 +382,9 @@ Weights are cached in the browser after first download.</div>
         const stopMicBtn = $('stop-mic-btn');
         const cancelMicBtn = $('cancel-mic-btn');
         const transcribeBtn = $('transcribe-btn');
-        const micViz = $('mic-viz');
-        const recTimer = $('rec-timer');
 
         let audioFile = null;
         let recStartTime = null;
-        let recTimerInterval = null;
 
         function setStatus(cls, text) {
             statusDot.className = 'dot ' + cls;
@@ -489,6 +481,9 @@ Weights are cached in the browser after first download.</div>
             transcribeBtn.disabled = true;
             micBtn.disabled = true;
             clearOutput();
+            waveform.clear();
+            waveform.setColor('#8197bf'); // blue for file
+            waveformLabel.textContent = audioFile.name;
             transcriptionEl.textContent = 'transcribing...';
             transcriptionEl.classList.add('placeholder');
 
@@ -508,24 +503,18 @@ Weights are cached in the browser after first download.</div>
         });
 
         // Mic
-        function tickTimer() {
-            if (!recStartTime) return;
-            const s = Math.floor((Date.now() - recStartTime) / 1000);
-            recTimer.textContent = `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-        }
-
         micBtn.addEventListener('click', async () => {
             try {
                 clearOutput();
+                waveform.clear();
+                waveform.setColor('#cf6a4c'); // orange for mic
+                waveformLabel.textContent = 'recording';
                 await client.startMicrophone();
                 micBtn.style.display = 'none';
                 stopMicBtn.style.display = '';
                 cancelMicBtn.style.display = '';
-                micViz.classList.add('active');
                 statusDot.className = 'dot recording';
                 recStartTime = Date.now();
-                recTimerInterval = setInterval(tickTimer, 1000);
-                tickTimer();
             } catch (e) {
                 setStatus('error', 'mic: ' + e.message);
                 console.error(e);
@@ -533,11 +522,10 @@ Weights are cached in the browser after first download.</div>
         });
 
         stopMicBtn.addEventListener('click', async () => {
-            clearInterval(recTimerInterval);
             micBtn.style.display = '';
             stopMicBtn.style.display = 'none';
             cancelMicBtn.style.display = 'none';
-            micViz.classList.remove('active');
+            waveformLabel.textContent = '';
             transcriptionEl.textContent = 'transcribing...';
             transcriptionEl.classList.add('placeholder');
 
@@ -558,11 +546,10 @@ Weights are cached in the browser after first download.</div>
 
         cancelMicBtn.addEventListener('click', () => {
             client.cancelMicrophone();
-            clearInterval(recTimerInterval);
             micBtn.style.display = '';
             stopMicBtn.style.display = 'none';
             cancelMicBtn.style.display = 'none';
-            micViz.classList.remove('active');
+            waveformLabel.textContent = '';
             setStatus('ready', 'model loaded');
         });
     </script>

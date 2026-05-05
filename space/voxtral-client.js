@@ -25,12 +25,15 @@ export class VoxtralClient {
         this.pendingResolve = null;
         this.pendingReject = null;
         this.onProgress = null;
+        this.onAudioChunk = null;
 
         // Microphone state
         this.audioContext = null;
         this.mediaStream = null;
         this.mediaRecorder = null;
         this.recordedChunks = [];
+        this._analyserNode = null;
+        this._analyserTimer = null;
 
         // Audio processing
         this.targetSampleRate = 16000;
@@ -142,6 +145,8 @@ export class VoxtralClient {
      */
     async transcribeFile(file) {
         const audio = await this._decodeAudioFile(file);
+        // Send the decoded audio to waveform visualizer
+        if (this.onAudioChunk) this.onAudioChunk(audio);
         return this.transcribe(audio);
     }
 
@@ -173,6 +178,20 @@ export class VoxtralClient {
         };
 
         this.mediaRecorder.start(100);
+
+        // Set up AnalyserNode for real-time waveform visualization
+        if (this.onAudioChunk) {
+            const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+            this._analyserNode = this.audioContext.createAnalyser();
+            this._analyserNode.fftSize = 2048;
+            source.connect(this._analyserNode);
+
+            const buf = new Float32Array(this._analyserNode.fftSize);
+            this._analyserTimer = setInterval(() => {
+                this._analyserNode.getFloatTimeDomainData(buf);
+                if (this.onAudioChunk) this.onAudioChunk(buf);
+            }, 50); // ~20fps sample delivery
+        }
     }
 
     /**
@@ -362,6 +381,11 @@ export class VoxtralClient {
     }
 
     _stopMicrophone() {
+        if (this._analyserTimer) {
+            clearInterval(this._analyserTimer);
+            this._analyserTimer = null;
+        }
+        this._analyserNode = null;
         if (this.mediaStream) {
             this.mediaStream.getTracks().forEach(track => track.stop());
             this.mediaStream = null;

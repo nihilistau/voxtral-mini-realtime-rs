@@ -4,9 +4,16 @@
 //! Use `KVCache::new()` for dynamic (cat-based) caching and
 //! `KVCache::preallocated()` for pre-allocated buffers that avoid
 //! per-step GPU allocations.
+//!
+//! Optionally integrates Shannon-Prime VHT2 compression: when a
+//! `ShannonPrimeConfig` is attached, K/V tensors are compressed via
+//! VHT2 + banded quantization before storage and decompressed on read.
+//! This is transparent to the attention layer.
 
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
+
+use super::shannon_prime::{compress_kv_tensor, decompress_kv_tensor, ShannonPrimeConfig};
 
 /// KV Cache supporting dynamic concatenation or pre-allocated buffers.
 ///
@@ -26,6 +33,9 @@ pub struct KVCache<B: Backend> {
     len: usize,
     /// Pre-allocated capacity. 0 = dynamic (cat) mode.
     capacity: usize,
+    /// Optional Shannon-Prime VHT2 compression config.
+    /// When set, K/V are compressed before storage and decompressed on read.
+    shannon_prime: Option<ShannonPrimeConfig>,
 }
 
 impl<B: Backend> Default for KVCache<B> {
@@ -42,6 +52,18 @@ impl<B: Backend> KVCache<B> {
             v: None,
             len: 0,
             capacity: 0,
+            shannon_prime: None,
+        }
+    }
+
+    /// Create an empty dynamic cache with Shannon-Prime VHT2 compression.
+    pub fn new_with_shannon_prime(config: ShannonPrimeConfig) -> Self {
+        Self {
+            k: None,
+            v: None,
+            len: 0,
+            capacity: 0,
+            shannon_prime: if config.enabled { Some(config) } else { None },
         }
     }
 
@@ -61,6 +83,25 @@ impl<B: Backend> KVCache<B> {
             v: Some(Tensor::zeros([batch, heads, max_seq, head_dim], device)),
             len: 0,
             capacity: max_seq,
+            shannon_prime: None,
+        }
+    }
+
+    /// Create a pre-allocated cache with Shannon-Prime VHT2 compression.
+    pub fn preallocated_with_shannon_prime(
+        batch: usize,
+        heads: usize,
+        max_seq: usize,
+        head_dim: usize,
+        device: &B::Device,
+        config: ShannonPrimeConfig,
+    ) -> Self {
+        Self {
+            k: Some(Tensor::zeros([batch, heads, max_seq, head_dim], device)),
+            v: Some(Tensor::zeros([batch, heads, max_seq, head_dim], device)),
+            len: 0,
+            capacity: max_seq,
+            shannon_prime: if config.enabled { Some(config) } else { None },
         }
     }
 
@@ -113,16 +154,29 @@ impl<B: Backend> KVCache<B> {
     }
 
     /// Update both K and V caches.
+    ///
+    /// When Shannon-Prime is enabled, compresses K/V via VHT2 + banded
+    /// quantization before storing, then decompresses the full cache
+    /// for attention computation. This is transparent to the caller.
     pub fn update(&mut self, k: Tensor<B, 4>, v: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>) {
-        if self.capacity > 0 {
-            let new_seq = k.dims()[2];
+        // Optionally compress before storage
+        let (k_store, v_store) = if let Some(ref sp) = self.shannon_prime {
+            let k_c = compress_kv_tensor(&k, &sp.k_config);
+            let v_c = compress_kv_tensor(&v, &sp.v_config);
+            (k_c, v_c)
+        } else {
+            (k, v)
+        };
+
+        let (k_full, v_full) = if self.capacity > 0 {
+            let new_seq = k_store.dims()[2];
             let pos = self.len;
             let k_buf = self.k.take().unwrap();
             let v_buf = self.v.take().unwrap();
             let [b, h, _, hd] = k_buf.dims();
 
-            let k_buf = k_buf.slice_assign([0..b, 0..h, pos..pos + new_seq, 0..hd], k);
-            let v_buf = v_buf.slice_assign([0..b, 0..h, pos..pos + new_seq, 0..hd], v);
+            let k_buf = k_buf.slice_assign([0..b, 0..h, pos..pos + new_seq, 0..hd], k_store);
+            let v_buf = v_buf.slice_assign([0..b, 0..h, pos..pos + new_seq, 0..hd], v_store);
 
             self.len = pos + new_seq;
             let new_len = self.len;
@@ -135,8 +189,17 @@ impl<B: Backend> KVCache<B> {
 
             (k_view, v_view)
         } else {
-            let k_full = self.update_k(k);
-            let v_full = self.update_v(v);
+            let k_full = self.update_k(k_store);
+            let v_full = self.update_v(v_store);
+            (k_full, v_full)
+        };
+
+        // Optionally decompress for attention
+        if let Some(ref sp) = self.shannon_prime {
+            let k_d = decompress_kv_tensor(&k_full, sp.head_dim);
+            let v_d = decompress_kv_tensor(&v_full, sp.head_dim);
+            (k_d, v_d)
+        } else {
             (k_full, v_full)
         }
     }
@@ -166,6 +229,11 @@ impl<B: Backend> KVCache<B> {
             self.v = None;
             self.len = 0;
         }
+    }
+
+    /// Returns true if Shannon-Prime VHT2 compression is enabled.
+    pub fn is_shannon_prime_enabled(&self) -> bool {
+        self.shannon_prime.is_some()
     }
 
     /// Apply sliding window eviction.
@@ -229,6 +297,41 @@ impl<B: Backend> LayerCaches<B> {
         Self {
             caches: (0..n_layers)
                 .map(|_| KVCache::preallocated(batch, n_kv_heads, max_seq, head_dim, device))
+                .collect(),
+        }
+    }
+
+    /// Create dynamic caches with Shannon-Prime VHT2 compression.
+    pub fn new_shannon_prime(n_layers: usize, config: ShannonPrimeConfig) -> Self {
+        Self {
+            caches: (0..n_layers)
+                .map(|_| KVCache::new_with_shannon_prime(config.clone()))
+                .collect(),
+        }
+    }
+
+    /// Create pre-allocated caches with Shannon-Prime VHT2 compression.
+    pub fn new_preallocated_shannon_prime(
+        n_layers: usize,
+        batch: usize,
+        n_kv_heads: usize,
+        max_seq: usize,
+        head_dim: usize,
+        device: &B::Device,
+        config: ShannonPrimeConfig,
+    ) -> Self {
+        Self {
+            caches: (0..n_layers)
+                .map(|_| {
+                    KVCache::preallocated_with_shannon_prime(
+                        batch,
+                        n_kv_heads,
+                        max_seq,
+                        head_dim,
+                        device,
+                        config.clone(),
+                    )
+                })
                 .collect(),
         }
     }

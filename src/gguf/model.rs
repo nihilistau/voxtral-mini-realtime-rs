@@ -16,6 +16,7 @@ use crate::models::layers::masking::{
     apply_causal_mask, apply_causal_mask_with_offset, apply_sliding_window_mask,
     apply_sliding_window_mask_with_offset,
 };
+use crate::models::layers::shannon_prime::ShannonPrimeConfig;
 use crate::models::layers::{ConvDownsampler, KVCache, LayerCaches, RmsNorm, RoPE};
 
 use super::linear::Q4Linear;
@@ -794,6 +795,11 @@ impl Q4LanguageModel {
         self.d_model
     }
 
+    /// Get the head dimension (for Shannon-Prime config).
+    pub fn head_dim(&self) -> usize {
+        self.layers.first().map_or(128, |l| l.attention.head_dim)
+    }
+
     /// Create a new KV cache for this decoder.
     pub fn create_cache(&self) -> LayerCaches<Wgpu> {
         LayerCaches::new(self.layers.len())
@@ -813,6 +819,29 @@ impl Q4LanguageModel {
             max_seq,
             head_dim,
             &self.device,
+        )
+    }
+
+    /// Create a pre-allocated KV cache with Shannon-Prime VHT2 compression.
+    ///
+    /// KV vectors are compressed via VHT2 + banded quantization before storage
+    /// (~4.6x compression), reducing memory bandwidth and keeping more of the
+    /// cache in L3 on SVM architectures (Intel NUC, Android DSP).
+    pub fn create_cache_preallocated_shannon_prime(
+        &self,
+        max_seq: usize,
+        config: ShannonPrimeConfig,
+    ) -> LayerCaches<Wgpu> {
+        let n_kv_heads = self.layers.first().map_or(8, |l| l.attention.n_kv_heads);
+        let head_dim = self.layers.first().map_or(96, |l| l.attention.head_dim);
+        LayerCaches::new_preallocated_shannon_prime(
+            self.layers.len(),
+            1,
+            n_kv_heads,
+            max_seq,
+            head_dim,
+            &self.device,
+            config,
         )
     }
 }
@@ -855,6 +884,8 @@ pub struct Q4VoxtralModel {
     decoder: Q4LanguageModel,
     adapter: Q4Adapter,
     reshape_factor: usize,
+    /// Optional Shannon-Prime VHT2 KV cache compression config.
+    shannon_prime: Option<ShannonPrimeConfig>,
 }
 
 impl Q4VoxtralModel {
@@ -870,7 +901,28 @@ impl Q4VoxtralModel {
             decoder,
             adapter,
             reshape_factor,
+            shannon_prime: None,
         }
+    }
+
+    /// Enable Shannon-Prime VHT2 KV cache compression.
+    ///
+    /// When enabled, the autoregressive decoder compresses K/V tensors
+    /// via VHT2 + banded quantization (~4.6x compression) before storing
+    /// in the KV cache. On SVM architectures (Intel NUC, Android DSP),
+    /// this keeps the cache in shared L3 for zero-copy CPU↔iGPU access.
+    pub fn enable_shannon_prime(&mut self, head_dim: usize) {
+        self.shannon_prime = Some(ShannonPrimeConfig::new(head_dim));
+    }
+
+    /// Enable Shannon-Prime with a custom configuration.
+    pub fn set_shannon_prime(&mut self, config: ShannonPrimeConfig) {
+        self.shannon_prime = Some(config);
+    }
+
+    /// Disable Shannon-Prime compression.
+    pub fn disable_shannon_prime(&mut self) {
+        self.shannon_prime = None;
     }
 
     /// Encode audio to hidden states ready for the LLM.
@@ -997,7 +1049,20 @@ impl Q4VoxtralModel {
 
         // Pre-allocate KV cache to the known sequence length to avoid
         // 52 growing Tensor::cat allocations per decode step (26 layers × K + V).
-        let mut decoder_cache = self.decoder.create_cache_preallocated(seq_len);
+        // When Shannon-Prime is enabled, KV vectors are compressed via VHT2
+        // before storage (~4.6x), keeping more of the cache in L3/shared memory.
+        let mut decoder_cache = if let Some(ref sp_config) = self.shannon_prime {
+            tracing::info!(
+                compression = "VHT2",
+                k_bits = ?sp_config.k_config.band_bits,
+                v_bits = ?sp_config.v_config.band_bits,
+                "Shannon-Prime KV cache compression enabled"
+            );
+            self.decoder
+                .create_cache_preallocated_shannon_prime(seq_len, sp_config.clone())
+        } else {
+            self.decoder.create_cache_preallocated(seq_len)
+        };
 
         let hidden = {
             let _prefill = tracing::info_span!("prefill").entered();

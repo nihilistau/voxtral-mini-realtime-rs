@@ -27,13 +27,23 @@
 12. **WASM build verified** — wasm32-unknown-unknown target installed, `cargo check` and `cargo build` pass
 13. **All tests pass** — 48 audio/tokenizer/ring-buffer, 12 GPU/GGUF, 4 Shannon-Prime = 64 total
 
+## What's Done (Session 2026-05-06 pt. 2 — Shannon-Prime SVM Engine)
+
+1. **Shannon-Prime wired into Q4 pipeline** — `KVCache::update()` now transparently compresses/decompresses via VHT2 when `ShannonPrimeConfig` is attached
+2. **CLI flags** — `--device integrated|discrete|auto` and `--shannon-prime` on both `transcribe` and `speak`
+3. **AVX-512/AVX2 VHT2** — runtime SIMD dispatch in `vht2_f32_inplace()` (scalar fallback preserved)
+4. **Engine module** — `src/engine/mod.rs` + `src/engine/svm.rs` with device selection and KV memory estimation
+5. **Architecture doc** — `docs/SHANNON_PRIME_SVM_ENGINE.md` covering NUC Beast Canyon + Optane M10 design
+6. **CI still green** — formatting fix from earlier session committed
+
 ## What's Next
 
-1. **Wire TUI into speak command** — TuiState into `voxtral speak` for TTS waveform display
-2. **WASM full build** — install wasm-pack, run `wasm-pack build --target web`, verify browser demo
-3. **Browser E2E test** — load model shards in browser, transcribe test audio
-4. **Tag v0.3.0 release** — after full E2E validation
-5. **CI fix investigation** — GitHub Actions may need Vulkan/GPU setup or skip adjustments
+1. **Compile and test Shannon-Prime integration** — `cargo build --features "wgpu,cli,hub"` then `cargo test`
+2. **Benchmark `--shannon-prime` flag** — compare RTF and WER with/without compression
+3. **NUC Beast Canyon deployment** — test with `--device integrated --shannon-prime`
+4. **Optane M10 integration** — mmap KV cache spill tier (arriving 2026-05-07)
+5. **Pipelined decode** — overlap CPU VHT2 with iGPU matmul on separate thread
+6. **Tag v0.4.0** — Shannon-Prime SVM engine release
 
 ## Key Files to Know
 

@@ -89,6 +89,8 @@ impl ShannonPrimeConfig {
 ///
 /// For power-of-2 dimensions: seven stages of p=2 Hartley butterfly,
 /// each scaled by 1/√2. Self-inverse: VHT2(VHT2(x)) = x.
+///
+/// Automatically dispatches to AVX2 or AVX-512 when available on x86_64.
 pub fn vht2_f32_inplace(data: &mut [f32]) {
     let n = data.len();
     debug_assert!(
@@ -96,6 +98,33 @@ pub fn vht2_f32_inplace(data: &mut [f32]) {
         "VHT2 requires power-of-2 length"
     );
 
+    // SIMD fast paths for x86_64 — runtime feature detection
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= 16 {
+            if is_x86_feature_detected!("avx512f") {
+                // SAFETY: AVX-512 detected, data length is power-of-2 >= 16
+                unsafe {
+                    vht2_f32_avx512(data);
+                }
+                return;
+            }
+            if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                // SAFETY: AVX2+FMA detected, data length is power-of-2 >= 16
+                unsafe {
+                    vht2_f32_avx2(data);
+                }
+                return;
+            }
+        }
+    }
+
+    vht2_f32_scalar(data);
+}
+
+/// Scalar fallback VHT2.
+fn vht2_f32_scalar(data: &mut [f32]) {
+    let n = data.len();
     let inv_sqrt2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let mut stride = n;
 
@@ -108,6 +137,93 @@ pub fn vht2_f32_inplace(data: &mut [f32]) {
                 let b = data[base + half + j];
                 data[base + j] = (a + b) * inv_sqrt2;
                 data[base + half + j] = (a - b) * inv_sqrt2;
+            }
+            base += stride;
+        }
+        stride = half;
+    }
+}
+
+/// AVX2 + FMA optimized VHT2 butterfly.
+///
+/// Processes 8 floats (256 bits) per iteration in each butterfly stage.
+/// For head_dim=128: 7 stages × 16 AVX2 ops = ~112 instructions.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn vht2_f32_avx2(data: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = data.len();
+    let inv_sqrt2 = _mm256_set1_ps(std::f32::consts::FRAC_1_SQRT_2);
+    let mut stride = n;
+
+    while stride > 1 {
+        let half = stride / 2;
+        let mut base = 0;
+        while base < n {
+            let mut j = 0;
+            // Process 8 elements at a time with AVX2
+            while j + 8 <= half {
+                let a = _mm256_loadu_ps(data.as_ptr().add(base + j));
+                let b = _mm256_loadu_ps(data.as_ptr().add(base + half + j));
+                let sum = _mm256_mul_ps(_mm256_add_ps(a, b), inv_sqrt2);
+                let diff = _mm256_mul_ps(_mm256_sub_ps(a, b), inv_sqrt2);
+                _mm256_storeu_ps(data.as_mut_ptr().add(base + j), sum);
+                _mm256_storeu_ps(data.as_mut_ptr().add(base + half + j), diff);
+                j += 8;
+            }
+            // Scalar tail for remaining elements
+            while j < half {
+                let a = data[base + j];
+                let b = data[base + half + j];
+                let s = std::f32::consts::FRAC_1_SQRT_2;
+                data[base + j] = (a + b) * s;
+                data[base + half + j] = (a - b) * s;
+                j += 1;
+            }
+            base += stride;
+        }
+        stride = half;
+    }
+}
+
+/// AVX-512 optimized VHT2 butterfly.
+///
+/// Processes 16 floats (512 bits) per iteration in each butterfly stage.
+/// For head_dim=128: 7 stages × 8 AVX-512 ops = ~56 instructions.
+/// Estimated throughput: ~12ns per 128-dim vector at 4.9 GHz.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn vht2_f32_avx512(data: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let n = data.len();
+    let inv_sqrt2 = _mm512_set1_ps(std::f32::consts::FRAC_1_SQRT_2);
+    let mut stride = n;
+
+    while stride > 1 {
+        let half = stride / 2;
+        let mut base = 0;
+        while base < n {
+            let mut j = 0;
+            // Process 16 elements at a time with AVX-512
+            while j + 16 <= half {
+                let a = _mm512_loadu_ps(data.as_ptr().add(base + j));
+                let b = _mm512_loadu_ps(data.as_ptr().add(base + half + j));
+                let sum = _mm512_mul_ps(_mm512_add_ps(a, b), inv_sqrt2);
+                let diff = _mm512_mul_ps(_mm512_sub_ps(a, b), inv_sqrt2);
+                _mm512_storeu_ps(data.as_mut_ptr().add(base + j), sum);
+                _mm512_storeu_ps(data.as_mut_ptr().add(base + half + j), diff);
+                j += 16;
+            }
+            // AVX2 or scalar tail for remaining elements (half < 16)
+            while j < half {
+                let a = data[base + j];
+                let b = data[base + half + j];
+                let s = std::f32::consts::FRAC_1_SQRT_2;
+                data[base + j] = (a + b) * s;
+                data[base + half + j] = (a - b) * s;
+                j += 1;
             }
             base += stride;
         }

@@ -20,6 +20,7 @@
 //! - **Backend-agnostic**: Works with CPU, CUDA, Metal, and WebGPU via Burn
 
 pub mod audio;
+pub mod engine;
 #[cfg(feature = "wgpu")]
 pub mod gguf;
 pub mod models;

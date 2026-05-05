@@ -63,10 +63,24 @@ pub struct Args {
     /// Euler ODE steps: 3=real-time, 4=balanced, 8=quality.
     #[arg(long, default_value_t = 4)]
     euler_steps: usize,
+
+    /// GPU device selection: "integrated", "discrete", or "auto" (default).
+    #[arg(long, default_value = "auto")]
+    device: String,
 }
 
 pub fn run(args: Args) -> Result<()> {
-    let device = burn::backend::wgpu::WgpuDevice::default();
+    let device = match args.device.as_str() {
+        "integrated" => {
+            info!("Using integrated GPU (SVM zero-copy mode)");
+            burn::backend::wgpu::WgpuDevice::IntegratedGpu(0)
+        }
+        "discrete" => {
+            info!("Using discrete GPU");
+            burn::backend::wgpu::WgpuDevice::DiscreteGpu(0)
+        }
+        _ => burn::backend::wgpu::WgpuDevice::default(),
+    };
 
     // Resolve tokenizer
     let tokenizer_path = match &args.tokenizer {

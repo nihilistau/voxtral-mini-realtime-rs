@@ -58,10 +58,31 @@ pub struct Args {
     /// Show real-time waveform TUI during transcription.
     #[arg(long)]
     tui: bool,
+
+    /// GPU device selection: "integrated", "discrete", or "auto" (default).
+    /// Use "integrated" on Intel NUC / SVM systems for zero-copy CPU↔iGPU.
+    #[arg(long, default_value = "auto")]
+    device: String,
+
+    /// Enable Shannon-Prime VHT2 KV cache compression (~4.6x).
+    /// Reduces memory bandwidth in autoregressive decode, keeping KV cache
+    /// in L3 on SVM architectures (Intel NUC, Android DSP).
+    #[arg(long)]
+    shannon_prime: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
-    let device = Default::default();
+    let device = match args.device.as_str() {
+        "integrated" => {
+            info!("Using integrated GPU (SVM zero-copy mode)");
+            burn::backend::wgpu::WgpuDevice::IntegratedGpu(0)
+        }
+        "discrete" => {
+            info!("Using discrete GPU");
+            burn::backend::wgpu::WgpuDevice::DiscreteGpu(0)
+        }
+        _ => Default::default(),
+    };
 
     if args.max_mel_frames == 0 {
         bail!("--max-mel-frames must be greater than 0");
@@ -116,7 +137,7 @@ pub fn run(args: Args) -> Result<()> {
     let time_embed = TimeEmbedding::new(3072);
     let t_embed = time_embed.embed::<Backend>(args.delay as f32, &device);
 
-    let model_state = load_model(&args, &device)?;
+    let model_state = load_model(&args, &device, args.shannon_prime)?;
     let chunk_config = ChunkConfig::voxtral().with_max_frames(args.max_mel_frames);
 
     // Set up optional TUI
@@ -207,6 +228,7 @@ enum ModelState {
 fn load_model(
     args: &Args,
     device: &<Backend as burn::tensor::backend::Backend>::Device,
+    shannon_prime: bool,
 ) -> Result<ModelState> {
     if let Some(gguf_path) = &args.gguf {
         use voxtral_mini_realtime::gguf::loader::Q4ModelLoader;
@@ -217,7 +239,15 @@ fn load_model(
         let start = Instant::now();
         info!("Loading Q4 GGUF model from {}", path.display());
         let mut loader = Q4ModelLoader::from_file(&path).context("Failed to open GGUF")?;
-        let model = loader.load(device).context("Failed to load Q4 model")?;
+        let mut model = loader.load(device).context("Failed to load Q4 model")?;
+        if shannon_prime {
+            // Decoder head_dim: d_model(3072) / n_heads(32) = 96... but the
+            // actual GQA head_dim is 128 (independent parameter). Use the
+            // model's reported head_dim.
+            let head_dim = model.decoder().head_dim();
+            info!(head_dim, "Enabling Shannon-Prime VHT2 KV cache compression");
+            model.enable_shannon_prime(head_dim);
+        }
         info!(
             elapsed_ms = start.elapsed().as_millis() as u64,
             "Q4 model loaded"

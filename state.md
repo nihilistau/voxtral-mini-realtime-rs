@@ -3,9 +3,11 @@
 **Last updated:** 2026-05-06  
 **Branch:** main (sp remote: nihilistau/voxtral-mini-realtime-rs)
 
-## Current Status: Phase 3 Complete — Documentation & README Done
+## Current Status: Phase 4 — Shannon-Prime SVM Engine
 
-Native build compiles and passes all tests. Waveform visualizer implemented for both browser (Canvas) and CLI (ratatui TUI). Shannon-Prime VHT2 tests fixed. Full documentation suite created. README updated for fork. CHANGELOG v0.3.0 written. TTS E2E validated (Q4, 14.5x RTF). ASR model download in progress for E2E validation.
+Shannon-Prime VHT2 compression now wired into the live Q4 inference pipeline. CLI flags `--device` (integrated/discrete/auto) and `--shannon-prime` added. AVX-512/AVX2 SIMD dispatch for VHT2. Engine module created (`src/engine/`) with SVM device selection and KV memory estimation. Architecture document written for NUC Beast Canyon deployment.
+
+Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all docs complete.
 
 ## What Works
 

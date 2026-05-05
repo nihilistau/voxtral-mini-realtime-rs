@@ -295,23 +295,20 @@ mod tests {
     }
 
     #[test]
-    fn test_vht2_energy_concentration() {
-        // Random-ish input
+    fn test_vht2_energy_preservation() {
+        // VHT2 is an orthogonal transform — it preserves total energy (Parseval).
         let mut data: Vec<f32> = (0..128)
             .map(|i| ((i * 7 + 13) % 100) as f32 / 50.0 - 1.0)
             .collect();
 
+        let energy_before: f32 = data.iter().map(|x| x * x).sum();
         vht2_f32_inplace(&mut data);
+        let energy_after: f32 = data.iter().map(|x| x * x).sum();
 
-        // Energy should concentrate in early coefficients
-        let total_energy: f32 = data.iter().map(|x| x * x).sum();
-        let first_quarter: f32 = data[..32].iter().map(|x| x * x).sum();
-
-        // First quarter should have more than 25% of energy (concentration)
+        let rel_diff = (energy_after - energy_before).abs() / energy_before;
         assert!(
-            first_quarter / total_energy > 0.25,
-            "VHT2 should concentrate energy: {:.1}% in first quarter",
-            100.0 * first_quarter / total_energy
+            rel_diff < 1e-5,
+            "VHT2 should preserve energy: before={energy_before:.4}, after={energy_after:.4}, diff={rel_diff:.2e}"
         );
     }
 

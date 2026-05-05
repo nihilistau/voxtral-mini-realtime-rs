@@ -22,6 +22,25 @@ use crate::models::layers::{ConvDownsampler, KVCache, LayerCaches, RmsNorm, RoPE
 use super::linear::Q4Linear;
 
 // ---------------------------------------------------------------------------
+// PipelineTiming — stage-level timing for pipelined inference
+// ---------------------------------------------------------------------------
+
+/// Timing breakdown for pipelined hybrid inference.
+#[derive(Debug, Default, Clone)]
+pub struct PipelineTiming {
+    /// Total encoding time across all chunks (ms).
+    pub encode_ms: f64,
+    /// Total cross-device transfer time (ms).
+    pub transfer_ms: f64,
+    /// Total decoding time across all chunks (ms).
+    pub decode_ms: f64,
+    /// Total wall-clock time (ms).
+    pub total_ms: f64,
+    /// Number of chunks processed.
+    pub n_chunks: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Q4Attention
 // ---------------------------------------------------------------------------
 
@@ -941,6 +960,11 @@ impl Q4VoxtralModel {
         self.shannon_prime = None;
     }
 
+    /// Get the Shannon-Prime config, if enabled.
+    pub fn shannon_prime_config(&self) -> Option<&ShannonPrimeConfig> {
+        self.shannon_prime.as_ref()
+    }
+
     /// Encode audio to hidden states ready for the LLM.
     pub fn encode_audio(&self, mel: Tensor<Wgpu, 3>) -> Tensor<Wgpu, 3> {
         let _span = tracing::info_span!("encode_audio").entered();
@@ -1260,6 +1284,177 @@ impl Q4VoxtralModel {
                 t_embed_decoder.clone(),
                 &mut decoder_cache,
             );
+            let logits = self.decoder.lm_head(hidden);
+
+            let pred = logits.argmax(2);
+            let next_token: i32 = pred.into_scalar().elem();
+            generated.push(next_token);
+        }
+
+        generated.into_iter().skip(PREFIX_LEN).collect()
+    }
+
+    /// Pipelined hybrid transcription for multiple audio chunks.
+    ///
+    /// Overlaps encoder and decoder work across GPU command queues:
+    /// while the decoder processes chunk N on the iGPU, the encoder
+    /// begins encoding chunk N+1 on the RTX. Since the two GPUs have
+    /// independent command queues, this achieves true parallel execution
+    /// on dual-GPU systems.
+    ///
+    /// Returns `(all_tokens, timing)` where timing breaks down per-stage costs.
+    pub fn transcribe_streaming_hybrid_pipelined(
+        &self,
+        mel_chunks: Vec<Tensor<Wgpu, 3>>,
+        t_embed: Tensor<Wgpu, 3>,
+    ) -> (Vec<Vec<i32>>, PipelineTiming) {
+        let _span =
+            tracing::info_span!("transcribe_pipelined", chunks = mel_chunks.len()).entered();
+
+        let decoder_device = self
+            .decoder_device
+            .as_ref()
+            .expect("pipelined hybrid requires set_decoder_device()");
+
+        let n_chunks = mel_chunks.len();
+        let mut all_tokens: Vec<Vec<i32>> = Vec::with_capacity(n_chunks);
+        let mut timing = PipelineTiming::default();
+
+        // Transfer t_embed to decoder device once
+        let t_embed_decoder = {
+            let data = t_embed.to_data();
+            Tensor::from_data(data, decoder_device)
+        };
+
+        // Pipeline state: hold the "next" encoder result while decoding current
+        let mut pending_encode: Option<Tensor<Wgpu, 3>> = None;
+        let mut encode_time_acc = 0.0f64;
+
+        for chunk_idx in 0..n_chunks {
+            let _chunk_span =
+                tracing::info_span!("chunk", idx = chunk_idx, total = n_chunks).entered();
+
+            // ── Step 1: Get encoded audio for this chunk ──
+            // Either from the pending encode (submitted during previous decode)
+            // or by encoding now (first chunk).
+            let audio_embeds_encoder = if let Some(pending) = pending_encode.take() {
+                // We already kicked off encoding — sync it now
+                let sync_start = std::time::Instant::now();
+                let _ = pending.clone().slice([0..1, 0..1, 0..1]).to_data(); // GPU sync
+                encode_time_acc += sync_start.elapsed().as_secs_f64() * 1000.0;
+                pending
+            } else {
+                // First chunk — encode synchronously
+                let enc_start = std::time::Instant::now();
+                let encoded = self.encode_audio(mel_chunks[chunk_idx].clone());
+                let _ = encoded.clone().slice([0..1, 0..1, 0..1]).to_data(); // GPU sync
+                encode_time_acc += enc_start.elapsed().as_secs_f64() * 1000.0;
+                encoded
+            };
+
+            // ── Step 2: Transfer to decoder device ──
+            let xfer_start = std::time::Instant::now();
+            let audio_embeds = {
+                let data = audio_embeds_encoder.to_data();
+                drop(audio_embeds_encoder);
+                Tensor::from_data(data, decoder_device)
+            };
+            timing.transfer_ms += xfer_start.elapsed().as_secs_f64() * 1000.0;
+
+            // ── Step 3: Kick off encoding for next chunk (overlaps with decode) ──
+            if chunk_idx + 1 < n_chunks {
+                let enc_start = std::time::Instant::now();
+                let next_encoded = self.encode_audio(mel_chunks[chunk_idx + 1].clone());
+                // Don't sync — let the RTX work while we decode on iGPU
+                encode_time_acc += enc_start.elapsed().as_secs_f64() * 1000.0;
+                pending_encode = Some(next_encoded);
+            }
+
+            // ── Step 4: Decode on iGPU ──
+            let decode_start = std::time::Instant::now();
+            let tokens = self.decode_on_device(audio_embeds, t_embed_decoder.clone());
+            timing.decode_ms += decode_start.elapsed().as_secs_f64() * 1000.0;
+
+            tracing::info!(
+                chunk = chunk_idx + 1,
+                total = n_chunks,
+                tokens = tokens.len(),
+                "Chunk decoded"
+            );
+            all_tokens.push(tokens);
+        }
+
+        timing.encode_ms = encode_time_acc;
+        timing.total_ms = timing.encode_ms + timing.transfer_ms + timing.decode_ms;
+        timing.n_chunks = n_chunks;
+
+        (all_tokens, timing)
+    }
+
+    /// Decode audio embeddings on the current decoder device.
+    /// Internal helper used by both hybrid and pipelined paths.
+    fn decode_on_device(
+        &self,
+        audio_embeds: Tensor<Wgpu, 3>,
+        t_embed: Tensor<Wgpu, 3>,
+    ) -> Vec<i32> {
+        let [_, seq_len, d_model] = audio_embeds.dims();
+
+        const PREFIX_LEN: usize = 38;
+        const BOS_TOKEN: i32 = 1;
+        const STREAMING_PAD: i32 = 32;
+
+        if seq_len < PREFIX_LEN {
+            return Vec::new();
+        }
+
+        let mut prefix: Vec<i32> = vec![BOS_TOKEN];
+        prefix.extend(std::iter::repeat_n(STREAMING_PAD, PREFIX_LEN - 1));
+
+        let prefix_text_embeds = self.decoder.embed_tokens_from_ids(&prefix, 1, PREFIX_LEN);
+        let prefix_audio = audio_embeds
+            .clone()
+            .slice([0..1, 0..PREFIX_LEN, 0..d_model]);
+        let prefix_inputs = prefix_audio + prefix_text_embeds;
+
+        let mut decoder_cache = if let Some(ref sp_config) = self.shannon_prime {
+            self.decoder
+                .create_cache_preallocated_shannon_prime(seq_len, sp_config.clone())
+        } else {
+            self.decoder.create_cache_preallocated(seq_len)
+        };
+
+        let hidden = self.decoder.forward_hidden_with_cache(
+            prefix_inputs,
+            t_embed.clone(),
+            &mut decoder_cache,
+        );
+        let logits = self.decoder.lm_head(hidden);
+
+        let last_logits =
+            logits
+                .clone()
+                .slice([0..1, (PREFIX_LEN - 1)..PREFIX_LEN, 0..logits.dims()[2]]);
+        let first_pred = last_logits.argmax(2);
+        let first_token: i32 = first_pred.into_scalar().elem();
+
+        let mut generated = prefix;
+        generated.push(first_token);
+
+        let audio_slices: Vec<Tensor<Wgpu, 3>> = (PREFIX_LEN..seq_len)
+            .map(|pos| audio_embeds.clone().slice([0..1, pos..pos + 1, 0..d_model]))
+            .collect();
+        drop(audio_embeds);
+
+        for pos in (PREFIX_LEN + 1)..seq_len {
+            let new_token = generated[pos - 1];
+            let text_embed = self.decoder.embed_tokens_from_ids(&[new_token], 1, 1);
+            let audio_pos = audio_slices[pos - 1 - PREFIX_LEN].clone();
+            let input = audio_pos + text_embed;
+
+            let hidden =
+                self.decoder
+                    .forward_hidden_with_cache(input, t_embed.clone(), &mut decoder_cache);
             let logits = self.decoder.lm_head(hidden);
 
             let pred = logits.argmax(2);

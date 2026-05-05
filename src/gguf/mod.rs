@@ -20,8 +20,8 @@ mod tests;
 pub use linear::Q4Linear;
 pub use loader::{Q4ModelLoader, Q4ModelParts};
 pub use model::{
-    Q4AdaRmsNorm, Q4Adapter, Q4Attention, Q4AudioEncoder, Q4DecoderLayer, Q4EncoderLayer,
-    Q4FeedForward, Q4LanguageModel, Q4VoxtralModel,
+    PipelineTiming, Q4AdaRmsNorm, Q4Adapter, Q4Attention, Q4AudioEncoder, Q4DecoderLayer,
+    Q4EncoderLayer, Q4FeedForward, Q4LanguageModel, Q4VoxtralModel,
 };
 pub use op::q4_matmul;
 pub use reader::{GgmlDtype, GgufReader, GgufTensorInfo, ShardedCursor};

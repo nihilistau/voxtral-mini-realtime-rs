@@ -76,6 +76,12 @@ pub struct Args {
     /// for zero-copy KV cache access via shared L3 on UMA/SVM architectures.
     #[arg(long)]
     hybrid: bool,
+
+    /// Enable pipelined inference for chunked audio in hybrid mode.
+    /// Overlaps encoding chunk N+1 on RTX while decoding chunk N on iGPU.
+    /// Requires --hybrid. Most effective on long audio with multiple chunks.
+    #[arg(long, requires = "hybrid")]
+    pipelined: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -207,6 +213,7 @@ pub fn run(args: Args) -> Result<()> {
                 &chunk_config,
                 &t_embed,
                 &device,
+                args.pipelined,
             )
         })?;
 
@@ -357,6 +364,7 @@ fn transcribe_one(
     chunk_config: &ChunkConfig,
     t_embed: &Tensor<Backend, 3>,
     device: &<Backend as burn::tensor::backend::Backend>::Device,
+    pipelined: bool,
 ) -> Result<String> {
     let start = Instant::now();
     info!(path = %audio_path, "Loading audio");
@@ -392,6 +400,53 @@ fn transcribe_one(
     let total_chunks = chunks.len();
     let mut texts = Vec::new();
 
+    // ── Pipelined path: collect all mel chunks, process in one pipelined call ──
+    if pipelined {
+        if let ModelState::Q4 { model } = model_state {
+            if model.is_hybrid() {
+                info!(
+                    chunks = total_chunks,
+                    "Starting pipelined hybrid transcription"
+                );
+                let mut mel_tensors = Vec::with_capacity(total_chunks);
+                for chunk in &chunks {
+                    let chunk_audio = AudioBuffer::new(chunk.samples.clone(), sample_rate);
+                    let mel_tensor =
+                        mel_tensor_from_audio(&chunk_audio, mel_extractor, pad_config, device)?;
+                    mel_tensors.push(mel_tensor);
+                }
+
+                let (all_tokens, timing) =
+                    model.transcribe_streaming_hybrid_pipelined(mel_tensors, t_embed.clone());
+
+                info!(
+                    encode_ms = format!("{:.1}", timing.encode_ms),
+                    transfer_ms = format!("{:.1}", timing.transfer_ms),
+                    decode_ms = format!("{:.1}", timing.decode_ms),
+                    total_ms = format!("{:.1}", timing.total_ms),
+                    "Pipelined transcription complete"
+                );
+
+                for generated in &all_tokens {
+                    let text_tokens: Vec<u32> = generated
+                        .iter()
+                        .filter(|&&t| t >= 1000)
+                        .map(|&t| t as u32)
+                        .collect();
+                    let text = tokenizer
+                        .decode(&text_tokens)
+                        .context("Failed to decode tokens")?;
+                    if !text.trim().is_empty() {
+                        texts.push(text.trim().to_string());
+                    }
+                }
+
+                return Ok(texts.join(" "));
+            }
+        }
+    }
+
+    // ── Sequential path (default) ──
     for (i, chunk) in chunks.iter().enumerate() {
         if total_chunks > 1 {
             let elapsed = start.elapsed();

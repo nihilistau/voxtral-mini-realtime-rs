@@ -1,0 +1,82 @@
+{
+  "results": [
+    {
+      "audio_file": "test_data\\mary_had_lamb.wav",
+      "mode": "discrete",
+      "audio_duration_secs": 3.44,
+      "preprocess_ms": 371.72470000000004,
+      "encode_ms": 2098.8970999999997,
+      "transfer_ms": 0.0,
+      "decode_ms": 4111.0589,
+      "total_ms": 6581.6807,
+      "rtf": 1.9132792414306057,
+      "decode_tokens": 30,
+      "tokens_per_sec": 7.2973899741499695,
+      "peak_memory_kb": null,
+      "shannon_prime": false
+    },
+    {
+      "audio_file": "test_data\\mary_had_lamb.wav",
+      "mode": "discrete+SP",
+      "audio_duration_secs": 3.44,
+      "preprocess_ms": 23.572499999999998,
+      "encode_ms": 1434.8933,
+      "transfer_ms": 0.0,
+      "decode_ms": 3423.4624,
+      "total_ms": 4881.9282,
+      "rtf": 1.4191651508124181,
+      "decode_tokens": 30,
+      "tokens_per_sec": 8.763058125014021,
+      "peak_memory_kb": null,
+      "shannon_prime": true
+    },
+    {
+      "audio_file": "test_data\\mary_had_lamb.wav",
+      "mode": "integrated+SP",
+      "audio_duration_secs": 3.44,
+      "preprocess_ms": 70.659,
+      "encode_ms": 26756.0513,
+      "transfer_ms": 0.0,
+      "decode_ms": 24101.0785,
+      "total_ms": 50927.788799999995,
+      "rtf": 14.804589521184473,
+      "decode_tokens": 30,
+      "tokens_per_sec": 1.2447575738156282,
+      "peak_memory_kb": null,
+      "shannon_prime": true
+    },
+    {
+      "audio_file": "test_data\\mary_had_lamb.wav",
+      "mode": "hybrid",
+      "audio_duration_secs": 3.44,
+      "preprocess_ms": 22.9346,
+      "encode_ms": 1522.9238,
+      "transfer_ms": 339.28360000000004,
+      "decode_ms": 23389.8394,
+      "total_ms": 25274.9814,
+      "rtf": 7.34737819173827,
+      "decode_tokens": 30,
+      "tokens_per_sec": 1.2826082080751695,
+      "peak_memory_kb": null,
+      "shannon_prime": true
+    },
+    {
+      "audio_file": "test_data\\mary_had_lamb.wav",
+      "mode": "hybrid+pipe",
+      "audio_duration_secs": 3.44,
+      "preprocess_ms": 23.2209,
+      "encode_ms": 1181.1051,
+      "transfer_ms": 0.283,
+      "decode_ms": 23638.4101,
+      "total_ms": 25200.468100000002,
+      "rtf": 7.325717349075318,
+      "decode_tokens": 30,
+      "tokens_per_sec": 1.2691208872799782,
+      "peak_memory_kb": null,
+      "shannon_prime": true
+    }
+  ],
+  "iterations": 1,
+  "warmup": 0,
+  "delay_tokens": 6
+}

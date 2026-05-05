@@ -106,6 +106,10 @@ impl Q4ModelLoader<ShardedCursor> {
 
 impl<R: Read + Seek> Q4ModelLoader<R> {
     /// Load the complete Q4 Voxtral model.
+    ///
+    /// Token embeddings are dequantized to f32 (~1.5 GiB GPU buffer).
+    /// For memory-constrained devices (e.g. integrated GPUs), use
+    /// [`load_compact`](Self::load_compact) instead.
     pub fn load(&mut self, device: &WgpuDevice) -> Result<Q4VoxtralModel> {
         info!(
             version = self.reader.version(),
@@ -125,6 +129,20 @@ impl<R: Read + Seek> Q4ModelLoader<R> {
         info!("Q4 model loaded");
 
         Ok(Q4VoxtralModel::new(encoder, decoder, adapter, 4))
+    }
+
+    /// Load the Q4 model with token embeddings kept in Q4 format (~216 MB).
+    ///
+    /// Unlike [`load`](Self::load), this does NOT dequantize the 131K-vocab
+    /// embedding table to f32 (~1.5 GiB). Instead, it keeps embeddings as Q4
+    /// on GPU for the lm_head matmul, with a CPU copy for embed_tokens lookups.
+    ///
+    /// Use this for memory-constrained devices like integrated GPUs where
+    /// a 1.5 GiB allocation would exceed the adapter's `maxBufferSize`.
+    pub fn load_compact(&mut self, device: &WgpuDevice) -> Result<Q4VoxtralModel> {
+        let parts = self.load_deferred(device)?;
+        info!("Finalizing model with Q4 embeddings (compact mode)");
+        parts.finalize(device)
     }
 
     /// Load model components without dequantizing token embeddings.

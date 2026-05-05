@@ -137,7 +137,8 @@ pub fn run(args: Args) -> Result<()> {
     let time_embed = TimeEmbedding::new(3072);
     let t_embed = time_embed.embed::<Backend>(args.delay as f32, &device);
 
-    let model_state = load_model(&args, &device, args.shannon_prime)?;
+    let use_compact = args.device == "integrated";
+    let model_state = load_model(&args, &device, args.shannon_prime, use_compact)?;
     let chunk_config = ChunkConfig::voxtral().with_max_frames(args.max_mel_frames);
 
     // Set up optional TUI
@@ -229,6 +230,7 @@ fn load_model(
     args: &Args,
     device: &<Backend as burn::tensor::backend::Backend>::Device,
     shannon_prime: bool,
+    compact: bool,
 ) -> Result<ModelState> {
     if let Some(gguf_path) = &args.gguf {
         use voxtral_mini_realtime::gguf::loader::Q4ModelLoader;
@@ -239,7 +241,14 @@ fn load_model(
         let start = Instant::now();
         info!("Loading Q4 GGUF model from {}", path.display());
         let mut loader = Q4ModelLoader::from_file(&path).context("Failed to open GGUF")?;
-        let mut model = loader.load(device).context("Failed to load Q4 model")?;
+        let mut model = if compact {
+            info!("Using compact mode (Q4 embeddings, ~216 MB instead of ~1.5 GiB)");
+            loader
+                .load_compact(device)
+                .context("Failed to load Q4 model (compact)")?
+        } else {
+            loader.load(device).context("Failed to load Q4 model")?
+        };
         if shannon_prime {
             // Decoder head_dim: d_model(3072) / n_heads(32) = 96... but the
             // actual GQA head_dim is 128 (independent parameter). Use the

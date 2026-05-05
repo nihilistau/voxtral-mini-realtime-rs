@@ -124,17 +124,13 @@ fn draw_ui(frame: &mut Frame, state: &TuiState) {
         .constraints([
             Constraint::Length(1),  // status bar
             Constraint::Length(10), // waveform
-            Constraint::Min(3),    // transcription
-            Constraint::Length(1), // help line
+            Constraint::Min(3),     // transcription
+            Constraint::Length(1),  // help line
         ])
         .split(frame.area());
 
     // Status bar
-    let status_text = state
-        .status
-        .lock()
-        .map(|s| s.clone())
-        .unwrap_or_default();
+    let status_text = state.status.lock().map(|s| s.clone()).unwrap_or_default();
     let status = Paragraph::new(Line::from(vec![
         Span::styled(" voxtral ", Style::default().fg(Color::Yellow).bold()),
         Span::styled("│ ", Style::default().fg(Color::DarkGray)),
@@ -171,11 +167,18 @@ fn draw_ui(frame: &mut Frame, state: &TuiState) {
             .title(" transcription "),
     )
     .wrap(Wrap { trim: false })
-    .style(if state.transcription.lock().map(|t| t.is_empty()).unwrap_or(true) {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-    });
+    .style(
+        if state
+            .transcription
+            .lock()
+            .map(|t| t.is_empty())
+            .unwrap_or(true)
+        {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default()
+        },
+    );
     frame.render_widget(transcription, chunks[2]);
 
     // Help

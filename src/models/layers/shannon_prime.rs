@@ -91,7 +91,10 @@ impl ShannonPrimeConfig {
 /// each scaled by 1/√2. Self-inverse: VHT2(VHT2(x)) = x.
 pub fn vht2_f32_inplace(data: &mut [f32]) {
     let n = data.len();
-    debug_assert!(n > 0 && n.is_power_of_two(), "VHT2 requires power-of-2 length");
+    debug_assert!(
+        n > 0 && n.is_power_of_two(),
+        "VHT2 requires power-of-2 length"
+    );
 
     let inv_sqrt2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let mut stride = n;
@@ -163,10 +166,7 @@ pub fn decompress_kv_vector(vec: &mut [f32]) {
 ///
 /// Input: [batch, heads, seq, head_dim] — modifies in place via data extraction.
 /// Returns a new compressed tensor.
-pub fn compress_kv_tensor<B: Backend>(
-    tensor: &Tensor<B, 4>,
-    config: &BandConfig,
-) -> Tensor<B, 4> {
+pub fn compress_kv_tensor<B: Backend>(tensor: &Tensor<B, 4>, config: &BandConfig) -> Tensor<B, 4> {
     let dims = tensor.dims();
     let [batch, heads, seq, head_dim] = dims;
     debug_assert_eq!(head_dim, config.head_dim);
@@ -188,10 +188,7 @@ pub fn compress_kv_tensor<B: Backend>(
 }
 
 /// Decompress K or V tensor along the head_dim axis.
-pub fn decompress_kv_tensor<B: Backend>(
-    tensor: &Tensor<B, 4>,
-    head_dim: usize,
-) -> Tensor<B, 4> {
+pub fn decompress_kv_tensor<B: Backend>(tensor: &Tensor<B, 4>, head_dim: usize) -> Tensor<B, 4> {
     let dims = tensor.dims();
     let [batch, heads, seq, hd] = dims;
     debug_assert_eq!(hd, head_dim);
@@ -232,11 +229,7 @@ impl<B: Backend> ShannonPrimeKVCache<B> {
     /// Update with new K, V tensors. Compresses before storing.
     ///
     /// Returns the full (decompressed) K, V for attention computation.
-    pub fn update(
-        &mut self,
-        k: Tensor<B, 4>,
-        v: Tensor<B, 4>,
-    ) -> (Tensor<B, 4>, Tensor<B, 4>) {
+    pub fn update(&mut self, k: Tensor<B, 4>, v: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>) {
         if !self.config.enabled {
             return self.inner.update(k, v);
         }
@@ -246,8 +239,7 @@ impl<B: Backend> ShannonPrimeKVCache<B> {
         let v_compressed = compress_kv_tensor(&v, &self.config.v_config);
 
         // Store compressed in inner cache
-        let (k_full_compressed, v_full_compressed) =
-            self.inner.update(k_compressed, v_compressed);
+        let (k_full_compressed, v_full_compressed) = self.inner.update(k_compressed, v_compressed);
 
         // Decompress full cache for attention
         let k_decompressed = decompress_kv_tensor(&k_full_compressed, self.config.head_dim);
@@ -289,7 +281,8 @@ mod tests {
             assert!(
                 (a - b).abs() < 1e-5,
                 "VHT2 round-trip error: {} vs {}",
-                a, b
+                a,
+                b
             );
         }
     }

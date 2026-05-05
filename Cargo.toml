@@ -27,6 +27,8 @@ wasm = [
     "getrandom/wasm_js",
 ]
 profiling = ["tracing-chrome"]
+# Intel Level Zero backend for zero-copy iGPU decode (Windows only)
+l0 = ["libloading", "naga"]
 
 [dependencies]
 # Burn ML framework - latest version with backend selection via features
@@ -86,6 +88,10 @@ getrandom = { version = "0.3", default-features = false, optional = true }
 wgpu = { version = "26", features = ["fragile-send-sync-non-atomic-wasm"], optional = true }
 rustc-hash = "1.1"
 
+# Level Zero backend (optional)
+libloading = { version = "0.8", optional = true }
+naga = { version = "29", features = ["wgsl-in", "spv-out"], optional = true }
+
 [dev-dependencies]
 criterion = "0.8"
 approx = "0.5"
@@ -101,6 +107,11 @@ required-features = ["cli", "native-tokenizer"]
 name = "e2e-bench"
 path = "src/bin/e2e_bench.rs"
 required-features = ["wgpu", "cli"]
+
+[[bin]]
+name = "l0-smoke"
+path = "src/bin/l0_smoke.rs"
+required-features = ["l0"]
 
 [[bench]]
 name = "audio"

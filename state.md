@@ -3,9 +3,9 @@
 **Last updated:** 2026-05-06  
 **Branch:** main (sp remote: nihilistau/voxtral-mini-realtime-rs)
 
-## Current Status: Phase 2 Complete — Waveform Visualizer Implemented
+## Current Status: Phase 3 Complete — Documentation & README Done
 
-Native build compiles and passes all tests. Waveform visualizer added for both browser (Canvas) and CLI (ratatui TUI). Shannon-Prime VHT2 tests fixed and passing. Ready for Phase 3 (documentation) and Phase 4 (E2E validation).
+Native build compiles and passes all tests. Waveform visualizer implemented for both browser (Canvas) and CLI (ratatui TUI). Shannon-Prime VHT2 tests fixed. Full documentation suite created. README updated for fork. CHANGELOG v0.3.0 written. TTS E2E validated (Q4, 14.5x RTF). ASR model download in progress for E2E validation.
 
 ## What Works
 
@@ -18,17 +18,22 @@ Native build compiles and passes all tests. Waveform visualizer added for both b
 | Ring buffer | **8/8 pass** | New: `src/audio/ring_buffer.rs` |
 | Browser waveform | **Implemented** | Canvas-based, `space/waveform.js` |
 | CLI TUI waveform | **Implemented** | ratatui + crossterm, `src/tui/` |
-| Native ASR (BF16) | Upstream verified | SafeTensors, full precision |
-| Native ASR (Q4 GGUF) | Upstream verified | Custom WGSL shader, ~2.5 GB |
-| WASM/Browser ASR | Upstream verified | WebGPU, sharded loading |
+| TTS (Q4 GGUF) | **E2E verified** | "Hello world" → 1.92s audio, 14.5x RTF |
 | TTS (BF16) | Upstream verified | 20 voices, 9 languages |
-| TTS (Q4) | Upstream verified | Euler-steps 3, real-time |
+| Native ASR (Q4 GGUF) | **Downloading model** | ~2.5 GB, curl in progress |
+| WASM/Browser | **Not yet tested** | wasm32 target not installed |
+| Docs (SETUP/USAGE/WASM_API) | **Complete** | `docs/` directory |
+| README (fork) | **Updated** | Fork additions, TUI, docs links |
+| CHANGELOG v0.3.0 | **Written** | All fork changes documented |
 
 ## Recent Commits (This Session)
 
-1. `b2abaae` — docs: add project management files (plan, state, handoff) and update CLAUDE.md
-2. `b866cf8` — fix: correct VHT2 test — verify energy preservation, not concentration
-3. `e12deac` — feat: add real-time waveform visualizer (browser + CLI TUI)
+1. `1c287ad` — feat: Shannon-Prime VHT2 KV cache compression module
+2. `b2abaae` — docs: add project management files (plan, state, handoff) and update CLAUDE.md
+3. `b866cf8` — fix: correct VHT2 test — verify energy preservation, not concentration
+4. `e12deac` — feat: add real-time waveform visualizer (browser + CLI TUI)
+5. `bb5b708` — docs: update state.md — Phase 1+2 complete
+6. `21645ad` — feat: wire TUI into transcribe CLI + add full documentation suite
 
 ## Remotes
 
@@ -41,11 +46,11 @@ Native build compiles and passes all tests. Waveform visualizer added for both b
 - Burn 0.20, cubecl 0.9, ratatui 0.29, crossterm 0.28
 - wasm-pack for browser builds (wasm32 target not yet installed)
 - Playwright + bun for E2E browser tests
-- Models: ~2.5 GB (Q4 GGUF), ~9 GB (BF16 SafeTensors), ~8 GB (TTS)
+- Models: TTS Q4 GGUF downloaded, ASR Q4 GGUF downloading
 
 ## Remaining Work
 
-1. **Phase 3 — Documentation:** README overhaul, setup guide, usage guide, API reference, WASM docs
-2. **Phase 4 — Integration:** Wire TUI into CLI transcribe/speak commands, E2E test with model weights
-3. **WASM build:** Install wasm32 target, verify wasm-pack build still works
-4. **Model weights:** Download for full E2E testing
+1. **ASR E2E test** — finish download, run `voxtral transcribe` with `--tui` flag
+2. **WASM build** — install wasm32 target, verify wasm-pack build
+3. **TUI in speak command** — wire TuiState into `voxtral speak`
+4. **Tag v0.3.0** — after E2E validation

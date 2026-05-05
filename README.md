@@ -1,4 +1,4 @@
-# Voxtral Mini 4B Realtime (Rust)
+# Voxtral Mini 4B Realtime (Rust) — Shannon-Prime Fork
 
 [![HuggingFace ASR](https://img.shields.io/badge/%F0%9F%A4%97-ASR_Model-yellow)](https://huggingface.co/TrevorJS/voxtral-mini-realtime-gguf)
 [![HuggingFace TTS](https://img.shields.io/badge/%F0%9F%A4%97-TTS_Model-yellow)](https://huggingface.co/TrevorJS/voxtral-tts-q4-gguf)
@@ -6,6 +6,18 @@
 [![TTS Demo](https://img.shields.io/badge/%F0%9F%94%8A-TTS_Demo-purple)](https://huggingface.co/spaces/TrevorJS/voxtral-4b-tts)
 
 Streaming speech recognition and text-to-speech running natively and in the browser. A pure Rust implementation of Mistral's [Voxtral Mini 4B Realtime](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602) (ASR) and [Voxtral 4B TTS](https://huggingface.co/mistralai/Voxtral-4B-TTS-2603) models using the [Burn](https://burn.dev) ML framework.
+
+> **Fork of [TrevorS/voxtral-mini-realtime-rs](https://github.com/TrevorS/voxtral-mini-realtime-rs)** — this fork adds real-time waveform visualization (browser Canvas + CLI TUI), Shannon-Prime VHT2 KV cache compression, and a full documentation suite.
+
+### Fork Additions
+
+| Feature | Description |
+|---------|-------------|
+| Real-time waveform (browser) | Canvas-based scrolling waveform with peak-bucketed downsampling, 60fps |
+| Real-time waveform (CLI TUI) | ratatui + crossterm Unicode block-character rendering via `--tui` flag |
+| Shannon-Prime VHT2 | Vilenkin-Hartley Transform KV cache compression (~4.6x) |
+| Shared ring buffer | `src/audio/ring_buffer.rs` — circular buffer with peak-bucketed snapshot |
+| Documentation suite | Setup guide, usage reference, WASM API docs in `docs/` |
 
 ## Benchmarks
 
@@ -65,6 +77,10 @@ cargo run --release --features "wgpu,cli,hub" --bin voxtral -- \
   transcribe --audio audio.wav --model models/voxtral
 cargo run --release --features "wgpu,cli,hub" --bin voxtral -- \
   transcribe --audio audio.wav --gguf models/voxtral-q4.gguf
+
+# With real-time TUI waveform display
+cargo run --release --features "wgpu,cli,hub" --bin voxtral -- \
+  transcribe --audio audio.wav --gguf models/voxtral-q4.gguf --tui
 ```
 
 ### Browser Demo
@@ -209,20 +225,40 @@ The dev server discovers shards from `models/voxtral-q4-shards/` (ASR) and `mode
 
 ```
 src/
-  audio/          # Mel spectrogram, chunking, resampling, padding
-  models/         # BF16 model: encoder, decoder, adapter, attention, RoPE, KV cache
-  gguf/           # Q4 GGUF: reader, loader, model, tensor, WGSL shader, tests
-  web/            # WASM bindings: VoxtralQ4, initWgpuDevice, async decode loop
-  tts/            # TTS pipeline: backbone, flow matching, codec, voice presets
-  tokenizer/      # Tekken tokenizer: decode (ASR) + encode (TTS via tiktoken)
-  bin/transcribe  # ASR CLI binary
-  bin/speak       # TTS CLI binary
+  audio/            # Mel spectrogram, chunking, resampling, padding, ring buffer
+    ring_buffer.rs  # Shared circular buffer for waveform visualization
+  models/           # BF16 model: encoder, decoder, adapter, attention, RoPE, KV cache
+    layers/
+      shannon_prime.rs  # VHT2 KV cache compression (Shannon-Prime)
+  gguf/             # Q4 GGUF: reader, loader, model, tensor, WGSL shader, tests
+  web/              # WASM bindings: VoxtralQ4, initWgpuDevice, async decode loop
+  tts/              # TTS pipeline: backbone, flow matching, codec, voice presets
+  tokenizer/        # Tekken tokenizer: decode (ASR) + encode (TTS via tiktoken)
+  tui/              # Terminal UI: waveform widget, event loop, shared state
+    mod.rs          # TuiState + run_tui() event loop
+    waveform_widget.rs  # Unicode block-char waveform renderer
+  bin/voxtral/
+    transcribe.rs   # ASR CLI binary (--tui flag for waveform display)
+    speak.rs        # TTS CLI binary
 
-web/              # Browser demo: index.html, worker.js, voxtral-client.js
-tests/            # Integration tests + Playwright E2E spec
-scripts/          # Dev scripts: reference implementations, weight inspection, E2E helpers
-patches/          # cubecl-wgpu workgroup size fix for WebGPU
+space/              # Browser demo: index.html, worker.js, voxtral-client.js
+  waveform.js       # Canvas-based scrolling waveform renderer
+tests/              # Integration tests + Playwright E2E spec
+scripts/            # Dev scripts: reference implementations, weight inspection
+patches/            # cubecl-wgpu workgroup size fix for WebGPU
+docs/               # Documentation suite
+  SETUP.md          # Installation and build guide
+  USAGE.md          # CLI and API usage reference
+  WASM_API.md       # Browser JavaScript API docs
 ```
+
+## Documentation
+
+Detailed documentation is available in the `docs/` directory:
+
+- **[Setup Guide](docs/SETUP.md)** — Installation, prerequisites, model downloads, and troubleshooting
+- **[Usage Guide](docs/USAGE.md)** — CLI commands, Rust API examples, browser quickstart
+- **[WASM API Reference](docs/WASM_API.md)** — VoxtralClient and WaveformRenderer JavaScript APIs
 
 ## License
 

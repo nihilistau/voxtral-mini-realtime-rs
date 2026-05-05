@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.3.0 (Shannon-Prime Fork)
+
+### Added
+
+- **Real-time waveform visualizer (browser)** — Canvas-based scrolling waveform
+  in `space/waveform.js` with peak-bucketed downsampling, 60fps rendering via
+  `requestAnimationFrame`, high-DPI support, and automatic resize via
+  `ResizeObserver`. Color-coded: orange for microphone, blue for file playback.
+  Wired into `VoxtralClient` via the `onAudioChunk` callback.
+
+- **Real-time waveform visualizer (CLI TUI)** — ratatui + crossterm terminal UI
+  in `src/tui/` with Unicode block-character amplitude bars (▁▂▃▄▅▆▇█).
+  Activated via `voxtral transcribe --tui`. Shows live waveform, transcription
+  text, and status bar. Press `q` or `Esc` to exit.
+
+- **Shared ring buffer** — `src/audio/ring_buffer.rs` provides a fixed-capacity
+  circular buffer with `push_slice()` for audio ingestion and `snapshot_peaks(width)`
+  for peak-bucketed downsampling to any display width. Used by both the browser
+  and CLI waveform renderers.
+
+- **Shannon-Prime VHT2 KV cache compression** — Vilenkin-Hartley Transform
+  spectral-domain banded quantization in `src/models/layers/shannon_prime.rs`.
+  Achieves ~4.6x KV cache compression with negligible quality impact. Wraps the
+  existing `KVCache` transparently via `ShannonPrimeKVCache`.
+
+- **Documentation suite** — `docs/SETUP.md` (installation and build guide),
+  `docs/USAGE.md` (CLI and API usage reference), `docs/WASM_API.md` (browser
+  JavaScript API for VoxtralClient and WaveformRenderer).
+
+- **Project management files** — `plan.md`, `state.md`, `handoff.md` for
+  session continuity and development tracking.
+
+### Changed
+
+- `space/index.html` — replaced CSS-animated mic bars with Canvas waveform.
+- `space/voxtral-client.js` — added `onAudioChunk` callback and `AnalyserNode`
+  for real-time mic data at ~20fps.
+- README updated with fork additions, TUI usage, and documentation links.
+
+### Fixed
+
+- **VHT2 energy concentration test** — was asserting spectral energy
+  concentration in the first quarter (incorrect for Walsh-Hadamard butterflies).
+  Replaced with `test_vht2_energy_preservation` verifying Parseval's theorem
+  (total energy preserved through transform), which is the actual invariant for
+  the compression scheme.
+
 ## 0.2.1
 
 ### Fixed

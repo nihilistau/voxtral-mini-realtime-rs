@@ -128,6 +128,11 @@ name = "l0-decode"
 path = "src/bin/l0_decode.rs"
 required-features = ["l0", "wgpu", "cli"]
 
+[[bin]]
+name = "l0-hybrid"
+path = "src/bin/l0_hybrid.rs"
+required-features = ["l0", "wgpu", "cli"]
+
 [[bench]]
 name = "audio"
 harness = false

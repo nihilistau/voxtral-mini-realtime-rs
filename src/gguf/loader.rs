@@ -145,6 +145,79 @@ impl<R: Read + Seek> Q4ModelLoader<R> {
         parts.finalize(device)
     }
 
+    /// Load the Q4 model in hybrid split-device mode.
+    ///
+    /// - **Encoder + adapter** → `encoder_device` (typically discrete GPU for fast matmul)
+    /// - **Decoder** → `decoder_device` (typically integrated GPU for zero-copy KV cache)
+    ///
+    /// The decoder uses Q4 embeddings (~216 MB) to fit within the iGPU's buffer limits.
+    /// During inference, audio embeddings are transferred from the encoder device to
+    /// the decoder device via `to_data()`/`from_data()` — on UMA (shared memory)
+    /// architectures this is effectively zero-copy.
+    pub fn load_hybrid(
+        &mut self,
+        encoder_device: &WgpuDevice,
+        decoder_device: &WgpuDevice,
+    ) -> Result<Q4VoxtralModel> {
+        info!(
+            version = self.reader.version(),
+            tensors = self.reader.tensor_count(),
+            "Loading Q4 Voxtral model in hybrid mode"
+        );
+
+        info!(layers = 32, "Loading audio encoder on encoder device");
+        let encoder = self.load_encoder(encoder_device)?;
+
+        info!("Loading audio-language adapter on encoder device");
+        let adapter = self.load_adapter(encoder_device)?;
+
+        // Extract raw Q4 bytes for token embeddings
+        let tok_name = prefixes::TOK_EMBEDDINGS;
+        let tok_info = self
+            .reader
+            .tensor_info(tok_name)
+            .with_context(|| format!("Tensor '{tok_name}' not found"))?
+            .clone();
+        let tok_shape = reverse_gguf_dims(tok_info.shape());
+        let tok_embed_q4_bytes = self.reader.tensor_data(tok_name)?;
+
+        info!(layers = 26, "Loading decoder on decoder device");
+        let dec_config = config::LanguageModelConfig::default();
+        let decoder_rope = RoPEConfig::new(dec_config.head_dim, 16384)
+            .with_theta(dec_config.rope_theta)
+            .init(decoder_device);
+        let mut decoder_layers = Vec::with_capacity(dec_config.n_layers);
+        for i in 0..dec_config.n_layers {
+            let layer = self
+                .load_decoder_layer(i, &dec_config, decoder_device)
+                .with_context(|| format!("Failed to load decoder layer {i}"))?;
+            decoder_layers.push(layer);
+        }
+        let decoder_norm =
+            self.load_rms_norm(prefixes::FINAL_NORM, dec_config.norm_eps, decoder_device)?;
+
+        // Build decoder with Q4 embeddings on the decoder device
+        let [vocab, d_model] = [tok_shape[0], tok_shape[1]];
+        let tok_embed_q4 =
+            Q4Tensor::from_q4_bytes(&tok_embed_q4_bytes, [vocab, d_model], decoder_device)?;
+
+        let decoder = Q4LanguageModel::new_q4_embeddings(
+            tok_embed_q4,
+            tok_embed_q4_bytes,
+            d_model,
+            decoder_device.clone(),
+            decoder_rope,
+            decoder_layers,
+            decoder_norm,
+        );
+
+        info!("Hybrid model loaded (encoder→encoder_device, decoder→decoder_device)");
+
+        let mut model = Q4VoxtralModel::new(encoder, decoder, adapter, 4);
+        model.set_decoder_device(decoder_device.clone());
+        Ok(model)
+    }
+
     /// Load model components without dequantizing token embeddings.
     ///
     /// Returns [`Q4ModelParts`] containing all components plus raw Q4 bytes

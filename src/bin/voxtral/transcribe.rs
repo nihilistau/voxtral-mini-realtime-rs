@@ -69,19 +69,33 @@ pub struct Args {
     /// in L3 on SVM architectures (Intel NUC, Android DSP).
     #[arg(long)]
     shannon_prime: bool,
+
+    /// Hybrid split-device mode: encoder on discrete GPU (RTX), decoder on
+    /// integrated GPU (iGPU) with Shannon-Prime KV cache compression.
+    /// Maximizes throughput by using the RTX for fast encoding and the iGPU
+    /// for zero-copy KV cache access via shared L3 on UMA/SVM architectures.
+    #[arg(long)]
+    hybrid: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
-    let device = match args.device.as_str() {
-        "integrated" => {
-            info!("Using integrated GPU (SVM zero-copy mode)");
-            burn::backend::wgpu::WgpuDevice::IntegratedGpu(0)
+    let device = if args.hybrid {
+        // In hybrid mode, the primary device is the discrete GPU (encoder).
+        // The decoder device is handled separately inside the model.
+        info!("Hybrid mode: encoder on discrete GPU, decoder on integrated GPU");
+        burn::backend::wgpu::WgpuDevice::DiscreteGpu(0)
+    } else {
+        match args.device.as_str() {
+            "integrated" => {
+                info!("Using integrated GPU (SVM zero-copy mode)");
+                burn::backend::wgpu::WgpuDevice::IntegratedGpu(0)
+            }
+            "discrete" => {
+                info!("Using discrete GPU");
+                burn::backend::wgpu::WgpuDevice::DiscreteGpu(0)
+            }
+            _ => Default::default(),
         }
-        "discrete" => {
-            info!("Using discrete GPU");
-            burn::backend::wgpu::WgpuDevice::DiscreteGpu(0)
-        }
-        _ => Default::default(),
     };
 
     if args.max_mel_frames == 0 {
@@ -138,7 +152,12 @@ pub fn run(args: Args) -> Result<()> {
     let t_embed = time_embed.embed::<Backend>(args.delay as f32, &device);
 
     let use_compact = args.device == "integrated";
-    let model_state = load_model(&args, &device, args.shannon_prime, use_compact)?;
+    let shannon_prime = args.shannon_prime || args.hybrid; // hybrid implies Shannon-Prime
+    let model_state = if args.hybrid {
+        load_model_hybrid(&args, &device)?
+    } else {
+        load_model(&args, &device, shannon_prime, use_compact)?
+    };
     let chunk_config = ChunkConfig::voxtral().with_max_frames(args.max_mel_frames);
 
     // Set up optional TUI
@@ -286,6 +305,48 @@ fn load_model(
     }
 }
 
+/// Load model in hybrid split-device mode: encoder on discrete, decoder on integrated.
+fn load_model_hybrid(
+    args: &Args,
+    encoder_device: &<Backend as burn::tensor::backend::Backend>::Device,
+) -> Result<ModelState> {
+    let gguf_path = args
+        .gguf
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--hybrid requires --gguf (Q4 model)"))?;
+
+    use voxtral_mini_realtime::gguf::loader::Q4ModelLoader;
+    let path = PathBuf::from(gguf_path);
+    if !path.exists() {
+        bail!("GGUF model not found at {}", path.display());
+    }
+
+    let decoder_device = burn::backend::wgpu::WgpuDevice::IntegratedGpu(0);
+
+    let start = Instant::now();
+    info!(
+        "Loading Q4 GGUF model in hybrid mode from {}",
+        path.display()
+    );
+    let mut loader = Q4ModelLoader::from_file(&path).context("Failed to open GGUF")?;
+    let mut model = loader
+        .load_hybrid(encoder_device, &decoder_device)
+        .context("Failed to load Q4 model (hybrid)")?;
+
+    let head_dim = model.decoder().head_dim();
+    info!(
+        head_dim,
+        "Enabling Shannon-Prime VHT2 KV cache compression (hybrid)"
+    );
+    model.enable_shannon_prime(head_dim);
+
+    info!(
+        elapsed_ms = start.elapsed().as_millis() as u64,
+        "Hybrid model loaded"
+    );
+    Ok(ModelState::Q4 { model })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transcribe_one(
     audio_path: &str,
@@ -355,7 +416,13 @@ fn transcribe_one(
         let mel_tensor = mel_tensor_from_audio(&chunk_audio, mel_extractor, pad_config, device)?;
 
         let generated = match model_state {
-            ModelState::Q4 { model } => model.transcribe_streaming(mel_tensor, t_embed.clone()),
+            ModelState::Q4 { model } => {
+                if model.is_hybrid() {
+                    model.transcribe_streaming_hybrid(mel_tensor, t_embed.clone())
+                } else {
+                    model.transcribe_streaming(mel_tensor, t_embed.clone())
+                }
+            }
             ModelState::F32 { model } => {
                 transcribe_f32(model, mel_tensor, t_embed.clone(), device)?
             }

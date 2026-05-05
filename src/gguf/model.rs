@@ -886,6 +886,11 @@ pub struct Q4VoxtralModel {
     reshape_factor: usize,
     /// Optional Shannon-Prime VHT2 KV cache compression config.
     shannon_prime: Option<ShannonPrimeConfig>,
+    /// Separate decoder device for hybrid split-device mode.
+    /// When set, encoder+adapter run on their original device and the decoder
+    /// runs on this device. Audio embeddings are transferred between devices
+    /// via `to_data()`/`from_data()` (zero-copy on UMA/SVM architectures).
+    decoder_device: Option<WgpuDevice>,
 }
 
 impl Q4VoxtralModel {
@@ -902,7 +907,18 @@ impl Q4VoxtralModel {
             adapter,
             reshape_factor,
             shannon_prime: None,
+            decoder_device: None,
         }
+    }
+
+    /// Set the decoder device for hybrid split-device mode.
+    pub fn set_decoder_device(&mut self, device: WgpuDevice) {
+        self.decoder_device = Some(device);
+    }
+
+    /// Check if this model is in hybrid split-device mode.
+    pub fn is_hybrid(&self) -> bool {
+        self.decoder_device.is_some()
     }
 
     /// Enable Shannon-Prime VHT2 KV cache compression.
@@ -1104,6 +1120,139 @@ impl Q4VoxtralModel {
             // map to audio_slices indices 0.., so pos-1 maps to index pos-1-PREFIX_LEN.
             let audio_pos = audio_slices[pos - 1 - PREFIX_LEN].clone();
 
+            let input = audio_pos + text_embed;
+
+            let hidden = self.decoder.forward_hidden_with_cache(
+                input,
+                t_embed_decoder.clone(),
+                &mut decoder_cache,
+            );
+            let logits = self.decoder.lm_head(hidden);
+
+            let pred = logits.argmax(2);
+            let next_token: i32 = pred.into_scalar().elem();
+            generated.push(next_token);
+        }
+
+        generated.into_iter().skip(PREFIX_LEN).collect()
+    }
+
+    /// Hybrid streaming transcription: encoder on discrete GPU, decoder on integrated GPU.
+    ///
+    /// Audio encoding (32 layers, ~0.6B params) runs on the fast discrete GPU (RTX).
+    /// The resulting audio embeddings are transferred to the integrated GPU via
+    /// `to_data()`/`from_data()` — on UMA/SVM architectures (Intel NUC Beast Canyon),
+    /// this is effectively zero-copy since both GPUs share the same physical memory.
+    ///
+    /// The autoregressive decoder (26 layers, ~3.4B params) then runs on the iGPU
+    /// with Shannon-Prime VHT2 KV cache compression keeping the cache in shared L3.
+    ///
+    /// Requires `set_decoder_device()` to have been called (via `load_hybrid()`).
+    pub fn transcribe_streaming_hybrid(
+        &self,
+        mel: Tensor<Wgpu, 3>,
+        t_embed_decoder: Tensor<Wgpu, 3>,
+    ) -> Vec<i32> {
+        let _span = tracing::info_span!("transcribe_streaming_hybrid").entered();
+
+        let decoder_device = self
+            .decoder_device
+            .as_ref()
+            .expect("transcribe_streaming_hybrid requires set_decoder_device()");
+
+        // Phase 1: Encode audio on the encoder's device (discrete GPU)
+        let audio_embeds_encoder = {
+            let _enc = tracing::info_span!("encode_audio_discrete").entered();
+            self.encode_audio(mel)
+        };
+        let [_, seq_len, d_model] = audio_embeds_encoder.dims();
+
+        // Phase 2: Transfer audio embeddings to the decoder's device (integrated GPU)
+        // On UMA/SVM this is zero-copy — the data never leaves shared memory.
+        let audio_embeds = {
+            let _xfer = tracing::info_span!("transfer_to_decoder_device").entered();
+            let data = audio_embeds_encoder.to_data();
+            // Drop the encoder-device tensor to free GPU memory
+            drop(audio_embeds_encoder);
+            Tensor::from_data(data, decoder_device)
+        };
+
+        // Transfer t_embed to decoder device
+        let t_embed_decoder = {
+            let data = t_embed_decoder.to_data();
+            Tensor::from_data(data, decoder_device)
+        };
+
+        tracing::info!(
+            seq_len,
+            d_model,
+            "Audio embeddings transferred to decoder device"
+        );
+
+        // Phase 3: Decode on the integrated GPU (same logic as transcribe_streaming)
+        const PREFIX_LEN: usize = 38;
+        const BOS_TOKEN: i32 = 1;
+        const STREAMING_PAD: i32 = 32;
+
+        if seq_len < PREFIX_LEN {
+            return Vec::new();
+        }
+
+        let mut prefix: Vec<i32> = vec![BOS_TOKEN];
+        prefix.extend(std::iter::repeat_n(STREAMING_PAD, PREFIX_LEN - 1));
+
+        let prefix_text_embeds = self.decoder.embed_tokens_from_ids(&prefix, 1, PREFIX_LEN);
+
+        let prefix_audio = audio_embeds
+            .clone()
+            .slice([0..1, 0..PREFIX_LEN, 0..d_model]);
+
+        let prefix_inputs = prefix_audio + prefix_text_embeds;
+
+        let mut decoder_cache = if let Some(ref sp_config) = self.shannon_prime {
+            tracing::info!(
+                compression = "VHT2",
+                k_bits = ?sp_config.k_config.band_bits,
+                v_bits = ?sp_config.v_config.band_bits,
+                "Shannon-Prime KV cache compression enabled (hybrid mode)"
+            );
+            self.decoder
+                .create_cache_preallocated_shannon_prime(seq_len, sp_config.clone())
+        } else {
+            self.decoder.create_cache_preallocated(seq_len)
+        };
+
+        let hidden = {
+            let _prefill = tracing::info_span!("prefill").entered();
+            self.decoder.forward_hidden_with_cache(
+                prefix_inputs,
+                t_embed_decoder.clone(),
+                &mut decoder_cache,
+            )
+        };
+        let logits = self.decoder.lm_head(hidden);
+
+        let last_logits =
+            logits
+                .clone()
+                .slice([0..1, (PREFIX_LEN - 1)..PREFIX_LEN, 0..logits.dims()[2]]);
+        let first_pred = last_logits.argmax(2);
+        let first_token: i32 = first_pred.into_scalar().elem();
+
+        let mut generated = prefix;
+        generated.push(first_token);
+
+        let audio_slices: Vec<Tensor<Wgpu, 3>> = (PREFIX_LEN..seq_len)
+            .map(|pos| audio_embeds.clone().slice([0..1, pos..pos + 1, 0..d_model]))
+            .collect();
+        drop(audio_embeds);
+
+        let _decode_span =
+            tracing::info_span!("decode_hybrid", tokens = seq_len - PREFIX_LEN - 1).entered();
+        for pos in (PREFIX_LEN + 1)..seq_len {
+            let new_token = generated[pos - 1];
+            let text_embed = self.decoder.embed_tokens_from_ids(&[new_token], 1, 1);
+            let audio_pos = audio_slices[pos - 1 - PREFIX_LEN].clone();
             let input = audio_pos + text_embed;
 
             let hidden = self.decoder.forward_hidden_with_cache(

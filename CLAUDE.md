@@ -178,3 +178,30 @@ The browser imposes hard limits that drive most of the complexity in `src/gguf/`
 ## E2E Testing
 
 `tests/e2e_browser.spec.ts` runs in headless Chromium via Playwright. Config in `playwright.config.ts` sets NVIDIA Vulkan ICD, WebGPU flags, and 10-minute timeout. The test spins up an HTTP server, loads shards, transcribes `test_data/mary_had_lamb.wav`, and asserts the output contains "mary" and "lamb".
+
+## Shannon-Prime Integration
+
+This fork adds Shannon-Prime VHT2 KV cache compression (`src/models/layers/shannon_prime.rs`). The module provides spectral-domain banded quantization using the Vilenkin-Hartley Transform, achieving ~4.6x KV cache compression with negligible quality impact. It wraps the existing `KVCache` transparently.
+
+Key types: `ShannonPrimeConfig`, `ShannonPrimeKVCache`, `BandConfig`.
+
+## Project Management Files
+
+- `plan.md` — Phased implementation plan (compile → waveform → docs → ship)
+- `state.md` — Current project status snapshot (update after each session)
+- `handoff.md` — Context for picking up where the last session left off
+
+## Waveform Visualizer (Planned)
+
+Real-time audio waveform visualization for both usage paths:
+
+- **Browser:** Canvas-based scrolling waveform in `space/index.html`, new `space/waveform.js`
+- **CLI (TUI):** ratatui + crossterm behind the `cli` feature flag, `src/tui/` module
+- **Shared:** Ring buffer abstraction in `src/audio/ring_buffer.rs`
+
+## Git Workflow
+
+- Direct commits to `main` allowed
+- Push to `sp` remote (nihilistau/voxtral-mini-realtime-rs)
+- Atomic commits per logical change
+- Tag releases at milestones (next: v0.3.0 for waveform feature)

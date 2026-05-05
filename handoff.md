@@ -36,14 +36,24 @@
 5. **Architecture doc** — `docs/SHANNON_PRIME_SVM_ENGINE.md` covering NUC Beast Canyon + Optane M10 design
 6. **CI still green** — formatting fix from earlier session committed
 
+## What's Done (Session 2026-05-06 pt. 3 — Hybrid Split Engine)
+
+1. **Hybrid RTX↔iGPU split engine** — encoder on RTX 2060 (discrete), decoder on Intel UHD (integrated)
+2. **`load_hybrid()`** in `Q4ModelLoader` — loads encoder+adapter on discrete GPU, decoder+Q4 embeddings on integrated
+3. **`transcribe_streaming_hybrid()`** — encode on RTX, transfer via `to_data()`/`from_data()` (zero-copy on UMA/SVM), decode on iGPU with Shannon-Prime KV cache
+4. **`--hybrid` CLI flag** — automatically enables Shannon-Prime, selects DiscreteGpu(0) for encoder, IntegratedGpu(0) for decoder
+5. **`load_compact()`** — keeps embeddings in Q4 (~216MB) for iGPU which can't allocate 1.5GB f32 buffer
+6. **All three modes tested** — discrete-only (RTX), integrated-only (iGPU + compact + Shannon-Prime), hybrid (RTX encoder + iGPU decoder)
+7. **E2E verified** — "Mary had a little lamb. Its fleece was" transcribed correctly in hybrid mode, model load 2.4s
+8. **Committed and pushed** — `e609714` on `sp` remote
+
 ## What's Next
 
-1. **Compile and test Shannon-Prime integration** — `cargo build --features "wgpu,cli,hub"` then `cargo test`
-2. **Benchmark `--shannon-prime` flag** — compare RTF and WER with/without compression
-3. **NUC Beast Canyon deployment** — test with `--device integrated --shannon-prime`
-4. **Optane M10 integration** — mmap KV cache spill tier (arriving 2026-05-07)
-5. **Pipelined decode** — overlap CPU VHT2 with iGPU matmul on separate thread
-6. **Tag v0.4.0** — Shannon-Prime SVM engine release
+1. **Optane M10 mmap integration** — arriving 2026-05-07, KV cache spill tier for large contexts
+2. **Pipelined overlap** — encode chunk N+1 on RTX while decoding chunk N on iGPU (async)
+3. **Benchmarking** — compare RTF across discrete/integrated/hybrid with proper timing instrumentation
+4. **GitHub CI release workflow** — automated builds and binary releases
+5. **Tag v0.4.0** — Shannon-Prime SVM engine release
 
 ## Key Files to Know
 
@@ -59,7 +69,9 @@
 | `src/tui/waveform_widget.rs` | Unicode waveform widget for ratatui |
 | `src/models/layers/shannon_prime.rs` | VHT2 KV cache compression |
 | `space/waveform.js` | Browser Canvas waveform renderer |
-| `src/bin/voxtral/transcribe.rs` | CLI transcribe with --tui flag |
+| `src/gguf/loader.rs` | Q4 model loading — load_compact(), load_hybrid() |
+| `src/gguf/model.rs` | Q4 model — transcribe_streaming_hybrid() |
+| `src/bin/voxtral/transcribe.rs` | CLI transcribe with --tui, --hybrid, --device flags |
 | `docs/SETUP.md` | Installation and build guide |
 | `docs/USAGE.md` | CLI and API usage reference |
 | `docs/WASM_API.md` | Browser JavaScript API docs |
@@ -109,4 +121,6 @@ cargo run --features "wgpu,cli,hub" --bin voxtral -- speak --text "Hello" --gguf
 7. **PDB collision warnings** — harmless on Windows when lib+binary share a crate name
 8. **TTS voice path** — must pass `--voices-dir models/voxtral-tts-q4-gguf/voice_embedding` explicitly
 9. **test_data/** — not in git; generate test audio via TTS or download separately
-10. **Release builds** — take 60-90s due to LTO; debug builds are faster but inference is ~5x slower
+10. **Release builds** — take 10-14 min with fat LTO (`codegen-units = 1`); debug builds are faster but inference is ~5x slower
+11. **iGPU 1.5GB limit** — Intel UHD can't allocate f32 token embeddings (1.5 GiB). Use `load_compact()` or `--hybrid` which keeps Q4 embeddings (~216 MB)
+12. **Hybrid mode** — `--hybrid` auto-enables `--shannon-prime`. Cross-device transfer is zero-copy on UMA but involves `to_data()`/`from_data()` on discrete systems

@@ -3,9 +3,11 @@
 **Last updated:** 2026-05-06  
 **Branch:** main (sp remote: nihilistau/voxtral-mini-realtime-rs)
 
-## Current Status: Phase 4 — Shannon-Prime SVM Engine
+## Current Status: Phase 4 — Shannon-Prime SVM Engine (Hybrid Complete)
 
-Shannon-Prime VHT2 compression now wired into the live Q4 inference pipeline. CLI flags `--device` (integrated/discrete/auto) and `--shannon-prime` added. AVX-512/AVX2 SIMD dispatch for VHT2. Engine module created (`src/engine/`) with SVM device selection and KV memory estimation. Architecture document written for NUC Beast Canyon deployment.
+Shannon-Prime VHT2 compression wired into Q4 pipeline. Hybrid RTX↔iGPU split engine implemented and tested on NUC Beast Canyon: encoder runs on RTX 2060 (discrete), decoder on Intel UHD (integrated) with Shannon-Prime KV cache compression. Three inference modes verified: discrete-only, integrated-only, hybrid.
+
+CLI flags: `--device` (integrated/discrete/auto), `--shannon-prime`, `--hybrid`. AVX-512/AVX2 SIMD dispatch for VHT2. Engine module (`src/engine/`) with SVM device selection and KV memory estimation.
 
 Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all docs complete.
 
@@ -22,7 +24,8 @@ Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all d
 | CLI TUI waveform | **Implemented** | ratatui + crossterm, `src/tui/` |
 | TTS (Q4 GGUF) | **E2E verified** | "Hello world" → 1.92s audio, 14.5x RTF |
 | TTS (BF16) | Upstream verified | 20 voices, 9 languages |
-| Native ASR (Q4 GGUF) | **Downloading model** | ~2.5 GB, curl in progress |
+| Native ASR (Q4 GGUF) | **E2E verified** | Discrete, integrated, and hybrid modes |
+| Hybrid split engine | **E2E verified** | RTX encoder + iGPU decoder, Shannon-Prime KV |
 | WASM/Browser | **Not yet tested** | wasm32 target not installed |
 | Docs (SETUP/USAGE/WASM_API) | **Complete** | `docs/` directory |
 | README (fork) | **Updated** | Fork additions, TUI, docs links |
@@ -36,6 +39,8 @@ Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all d
 4. `e12deac` — feat: add real-time waveform visualizer (browser + CLI TUI)
 5. `bb5b708` — docs: update state.md — Phase 1+2 complete
 6. `21645ad` — feat: wire TUI into transcribe CLI + add full documentation suite
+7. `c4ab5b1` — feat: Shannon-Prime SVM engine — device selection, KV cache wiring, AVX-512 VHT2
+8. `e609714` — feat: hybrid RTX↔iGPU split engine — encoder on discrete, decoder on integrated
 
 ## Remotes
 
@@ -52,7 +57,8 @@ Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all d
 
 ## Remaining Work
 
-1. **ASR E2E test** — finish download, run `voxtral transcribe` with `--tui` flag
-2. **WASM build** — install wasm32 target, verify wasm-pack build
-3. **TUI in speak command** — wire TuiState into `voxtral speak`
-4. **Tag v0.3.0** — after E2E validation
+1. **Optane M10 mmap integration** — arriving 2026-05-07, KV cache spill tier
+2. **Pipelined overlap** — encode chunk N+1 on RTX while decoding chunk N on iGPU
+3. **Benchmarking** — RTF comparison across discrete/integrated/hybrid modes
+4. **GitHub CI release workflow** — automated builds and releases
+5. **Tag v0.4.0** — Shannon-Prime SVM engine release

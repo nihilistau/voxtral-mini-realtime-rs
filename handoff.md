@@ -11,18 +11,24 @@
 - **Language:** Rust (Burn ML framework), WASM target for browser
 - **What it does:** Real-time speech-to-text and text-to-speech using Voxtral Mini 4B, runs natively (Vulkan/Metal) and in-browser (WebGPU)
 
-## What's Been Done
+## What's Been Done (Session 2026-05-06)
 
-1. **Upstream fork** with full ASR + TTS pipeline (BF16 and Q4 GGUF paths)
-2. **Shannon-Prime VHT2 compression** added to KV cache layer (`src/models/layers/shannon_prime.rs`) — 4.6x compression, +0.04% PPL improvement claimed
-3. **Planning documents** created: `plan.md`, `state.md`, this file
+1. **Compiled and validated** — Rust 1.92, Vulkan, 60+ tests passing
+2. **Fixed VHT2 test** — was asserting energy concentration (wrong for Walsh-Hadamard), now asserts energy preservation
+3. **Waveform visualizer (browser)** — Canvas-based scrolling waveform in `space/waveform.js`, wired into VoxtralClient via `onAudioChunk`
+4. **Waveform visualizer (CLI TUI)** — ratatui + crossterm in `src/tui/`, Unicode block-char rendering
+5. **Shared ring buffer** — `src/audio/ring_buffer.rs` with peak-bucketed downsampling
+6. **TUI integrated into CLI** — `voxtral transcribe --tui` flag spawns waveform display
+7. **Full documentation suite** — `docs/SETUP.md`, `docs/USAGE.md`, `docs/WASM_API.md`
 
-## What's Next (Immediate)
+## What's Next
 
-1. **Compile the project** — operator is new to Rust, may need toolchain setup
-2. **Run tests** — 230 tests should pass without model weights (most are unit tests)
-3. **Add waveform visualizer** — browser (Canvas) + CLI (ratatui TUI)
-4. **Document everything** — full suite: dev docs, user docs, API reference, changelog
+1. **E2E test with model weights** — download Q4 GGUF, run `voxtral transcribe` on test audio, verify output
+2. **TUI in speak command** — wire TuiState into `voxtral speak` for TTS waveform display
+3. **WASM build verification** — install wasm32 target, run `wasm-pack build`, verify browser demo
+4. **README overhaul** — fork-specific README with screenshots and feature matrix
+5. **CHANGELOG entry** — document v0.3.0 waveform feature
+6. **Tag release** — v0.3.0 after E2E validation
 
 ## Key Files to Know
 
@@ -31,47 +37,42 @@
 | `CLAUDE.md` | AI assistant instructions, build commands, architecture |
 | `plan.md` | Phased implementation plan |
 | `state.md` | Current project status snapshot |
-| `src/gguf/` | Q4 quantized inference (WASM-capable) |
-| `src/models/` | BF16 model components |
-| `src/tts/` | Text-to-speech pipeline |
-| `src/web/` | WASM bindings |
-| `src/audio/` | Audio processing (mel, resampling, normalization) |
-| `space/` | Browser demo app (ASR) |
-| `space-tts/` | Browser demo app (TTS) |
-| `src/models/layers/shannon_prime.rs` | VHT2 KV cache compression |
+| `src/audio/ring_buffer.rs` | Shared circular buffer for waveform viz |
+| `src/tui/mod.rs` | TUI event loop, TuiState shared state |
+| `src/tui/waveform_widget.rs` | Unicode waveform widget for ratatui |
+| `space/waveform.js` | Browser Canvas waveform renderer |
+| `src/bin/voxtral/transcribe.rs` | CLI transcribe with --tui flag |
+| `docs/SETUP.md` | Installation and build guide |
+| `docs/USAGE.md` | CLI and API usage reference |
+| `docs/WASM_API.md` | Browser JavaScript API docs |
 
 ## Build Commands (Quick Reference)
 
 ```bash
 # Native
-cargo build --features "wgpu,cli,hub"
-cargo test --features "wgpu,cli,hub"
+cargo build --release --features "wgpu,cli,hub"
+cargo test --features "wgpu,cli,hub" --lib
+cargo clippy --features "wgpu,cli,hub" -- -D warnings
 
 # WASM
 wasm-pack build --target web --no-default-features --features wasm
 
-# Lint
-cargo clippy --features "wgpu,cli,hub" -- -D warnings
+# Run transcription
+cargo run --features "wgpu,cli,hub" --bin voxtral -- transcribe --audio test_data/mary_had_lamb.wav --gguf models/voxtral-q4.gguf --tui
 ```
 
 ## Git Workflow
 
-- Work on `main` branch (direct commits allowed per CLAUDE.md)
+- Work on `main` branch (direct commits allowed)
 - Push to `sp` remote (nihilistau/voxtral-mini-realtime-rs)
-- Atomic commits, push after each phase completes
-- Tag releases at milestones
+- Atomic commits, push after each logical unit
 
 ## Gotchas & Warnings
 
-1. **Model weights not in repo** — need `hf download` commands from CLAUDE.md. Most unit tests don't need them.
-2. **WASM 2GB allocation limit** — drives the sharded loading design. Don't combine shards.
-3. **Peak normalization is critical** — Q4 path fails on quiet audio without it. See `AudioBuffer::peak_normalize(0.95)`.
-4. **cubecl patch** — `patches/cubecl-wgpu-0.9.0/` is required. Don't update cubecl without checking the patch.
-5. **Operator context** — user is new to Rust but experienced in other domains. Explain Rust-specific concepts when relevant.
-
-## Open Questions for Next Session
-
-- What Rust toolchain version is installed? (need stable + wasm32 target)
-- Are NVIDIA drivers / Vulkan SDK available for GPU tests?
-- Does the user want to download model weights now or defer to later?
-- Waveform visualizer: any specific visual style preferences?
+1. **Model weights not in repo** — need `hf download` commands from CLAUDE.md
+2. **WASM 2GB allocation limit** — drives sharded loading design
+3. **Peak normalization is critical** — Q4 path fails on quiet audio without `peak_normalize(0.95)`
+4. **cubecl patch** — `patches/cubecl-wgpu-0.9.0/` is required, don't update cubecl without checking
+5. **PowerShell timeout** — `cargo test` with all tests can exceed 45s due to GPU init. Run module subsets.
+6. **Git lock files** — sandbox sometimes leaves `.git/index.lock`. Remove before committing.
+7. **PDB collision warnings** — harmless on Windows when lib+binary share a crate name

@@ -21,6 +21,7 @@ use voxtral_mini_realtime::audio::{
 };
 use voxtral_mini_realtime::models::time_embedding::TimeEmbedding;
 use voxtral_mini_realtime::tokenizer::VoxtralTokenizer;
+use voxtral_mini_realtime::tui::TuiState;
 
 type Backend = Wgpu;
 
@@ -53,6 +54,10 @@ pub struct Args {
     /// Max mel frames per chunk.
     #[arg(long, default_value_t = 1200)]
     max_mel_frames: usize,
+
+    /// Show real-time waveform TUI during transcription.
+    #[arg(long)]
+    tui: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -114,7 +119,43 @@ pub fn run(args: Args) -> Result<()> {
     let model_state = load_model(&args, &device)?;
     let chunk_config = ChunkConfig::voxtral().with_max_frames(args.max_mel_frames);
 
+    // Set up optional TUI
+    let tui_state = if args.tui {
+        Some(TuiState::new())
+    } else {
+        None
+    };
+
+    // Launch TUI on a background thread if requested
+    let tui_handle = tui_state.as_ref().map(|state| {
+        let audio_buf = state.audio_buffer.clone();
+        let transcription = state.transcription.clone();
+        let status = state.status.clone();
+        let should_quit = state.should_quit.clone();
+
+        let tui_state_clone = TuiState {
+            audio_buffer: audio_buf,
+            transcription,
+            status,
+            should_quit,
+        };
+        std::thread::spawn(move || {
+            let _ = voxtral_mini_realtime::tui::run_tui(&tui_state_clone);
+        })
+    });
+
+    if let Some(ref state) = tui_state {
+        state.set_status("model loaded — transcribing...");
+    }
+
     for audio_path in &audio_paths {
+        // Push raw audio to TUI waveform
+        if let Some(ref state) = tui_state {
+            if let Ok(audio_preview) = load_wav(audio_path) {
+                state.push_audio(&audio_preview.samples);
+            }
+        }
+
         let text = run_with_chunk_hint(args.max_mel_frames, || {
             transcribe_one(
                 audio_path,
@@ -127,8 +168,29 @@ pub fn run(args: Args) -> Result<()> {
                 &device,
             )
         })?;
-        println!("{text}");
+
+        if let Some(ref state) = tui_state {
+            state.set_transcription(&text);
+            state.set_status("done — press q to exit");
+        } else {
+            println!("{text}");
+        }
     }
+
+    // Wait for TUI to exit (user presses q)
+    if let Some(handle) = tui_handle {
+        let _ = handle.join();
+    }
+
+    // Print final transcription to stdout if TUI was used
+    if let Some(ref state) = tui_state {
+        if let Ok(t) = state.transcription.lock() {
+            if !t.is_empty() {
+                println!("{t}");
+            }
+        }
+    }
+
     Ok(())
 }
 

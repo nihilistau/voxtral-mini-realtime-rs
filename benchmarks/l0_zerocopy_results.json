@@ -1,0 +1,42 @@
+{
+  "hardware": {
+    "igpu": "Intel UHD Graphics (32 EUs, Tiger Lake i9-11900KB)",
+    "backend": "Level Zero + USM (zeMemAllocShared)",
+    "cpu": "Intel Core i9-11900KB",
+    "memory": "Shared DRAM (UMA)"
+  },
+  "model_params": {
+    "kv_heads": 8,
+    "head_dim": 128,
+    "decoder_layers": 26,
+    "hidden_dim": 3072,
+    "matmul_shape": "[1, 1, 3072] × [3072, 3072]"
+  },
+  "shannon_prime": {
+    "bands": 4,
+    "band_bits": [5, 5, 4, 3],
+    "method": "VHT2 in-place on USM pointer (zero copy)"
+  },
+  "results_release_mode": {
+    "q4_matmul_ms": 0.763,
+    "vht2_compress_decompress_ms": 0.017,
+    "combined_1_layer_ms": 3.069,
+    "estimated_26_layer_ms": 79.8,
+    "estimated_tokens_per_sec": 12.5,
+    "estimated_rtf": 1.0
+  },
+  "comparison": {
+    "wgpu_igpu_sp_rtf": 14.80,
+    "l0_zerocopy_estimated_rtf": 1.0,
+    "improvement_factor": "~15×"
+  },
+  "date": "2026-05-06",
+  "branch": "svm-zero-copy",
+  "notes": [
+    "VHT2 is negligible (2.3% of compute) - Shannon-Prime compression is essentially free",
+    "Q4 matmul is GPU-bound at 0.76ms per [3072×3072] - hardware ceiling for 32 EUs",
+    "26-layer estimate assumes linear scaling (realistic for sequential decode)",
+    "Real RTF will include encoder time (done on RTX) + token embedding + softmax",
+    "Zero-copy validated: same *mut f32 used by CPU (VHT2) and GPU (attention)"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "audio_file": "test_data\\mary_2min.wav",
+      "mode": "discrete+SP",
+      "audio_duration_secs": 120.4,
+      "preprocess_ms": 674.8866999999999,
+      "encode_ms": 17296.2752,
+      "transfer_ms": 0.0,
+      "decode_ms": 61981.775499999996,
+      "total_ms": 79952.9374,
+      "rtf": 0.6640609334445468,
+      "decode_tokens": 761,
+      "tokens_per_sec": 12.277802529228936,
+      "peak_memory_kb": null,
+      "shannon_prime": true
+    }
+  ],
+  "iterations": 1,
+  "warmup": 0,
+  "delay_tokens": 6
+}

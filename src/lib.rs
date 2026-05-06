@@ -30,6 +30,9 @@ pub mod tts;
 #[cfg(feature = "cli")]
 pub mod tui;
 
+#[cfg(feature = "l0")]
+pub mod l0;
+
 #[cfg(feature = "wasm")]
 pub mod web;
 

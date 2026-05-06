@@ -339,11 +339,29 @@ impl L0Decoder {
             apply_rope(q, k, q_heads, kv_heads, head_dim, pos, rope_theta);
         }
 
-        // 4. Append K/V to USM cache with VHT2 (zero-copy)
+        // 4. Append K/V to USM cache with VHT2 (zero-copy, no heap alloc)
         unsafe {
-            let k = self.scratch_k.as_slice().to_vec();
-            let v = self.scratch_v.as_slice().to_vec();
-            self.write_kv_to_cache(layer_idx, &k, &v, pos);
+            let kv_heads = self.config.kv_heads;
+            let head_dim = self.config.head_dim;
+            let seq_idx = self.decode_ctx.seq_len();
+
+            let k_data = self.scratch_k.as_slice();
+            let v_data = self.scratch_v.as_slice();
+
+            for h in 0..kv_heads {
+                let src_offset = h * head_dim;
+                let effective_head = layer_idx * kv_heads + h;
+
+                // Key — write to USM, apply VHT2 in-place
+                let key_slice = self.decode_ctx.kv_cache.key_slice_mut(0, effective_head, seq_idx);
+                key_slice.copy_from_slice(&k_data[src_offset..src_offset + head_dim]);
+                vht2_compress_slice(key_slice, &self.band_config);
+
+                // Value
+                let val_slice = self.decode_ctx.kv_cache.value_slice_mut(0, effective_head, seq_idx);
+                val_slice.copy_from_slice(&v_data[src_offset..src_offset + head_dim]);
+                vht2_compress_slice(val_slice, &self.band_config);
+            }
         }
 
         // 5. Attention: Q × K^T / sqrt(d), softmax, × V (CPU for single-token decode)
@@ -417,40 +435,6 @@ impl L0Decoder {
     }
 
     /// Write K/V to per-layer KV cache position.
-    ///
-    /// The USM KV cache stores all layers' caches in a single allocation
-    /// multiplexed by layer: effective_head = layer_idx * kv_heads + h.
-    ///
-    /// VHT2 compress/decompress is applied in-place. For non-power-of-2 head_dim
-    /// (like 96), we pad to the next PoT (128), transform, then truncate back.
-    unsafe fn write_kv_to_cache(
-        &mut self,
-        layer_idx: usize,
-        k_data: &[f32],
-        v_data: &[f32],
-        _pos: usize,
-    ) {
-        let kv_heads = self.config.kv_heads;
-        let head_dim = self.config.head_dim;
-        let seq_idx = self.decode_ctx.seq_len();
-        let kv_cache = &self.decode_ctx.kv_cache;
-
-        for h in 0..kv_heads {
-            let src_offset = h * head_dim;
-            let effective_head = layer_idx * kv_heads + h;
-
-            // Key — write to USM, apply VHT2 in-place
-            let key_slice = kv_cache.key_slice_mut(0, effective_head, seq_idx);
-            key_slice.copy_from_slice(&k_data[src_offset..src_offset + head_dim]);
-            vht2_compress_slice(key_slice, &self.band_config);
-
-            // Value
-            let val_slice = kv_cache.value_slice_mut(0, effective_head, seq_idx);
-            val_slice.copy_from_slice(&v_data[src_offset..src_offset + head_dim]);
-            vht2_compress_slice(val_slice, &self.band_config);
-        }
-    }
-
     /// Compute multi-head attention on CPU for single-token decode.
     ///
     /// For single-token decode (M=1), attention is memory-bound, not compute-bound.

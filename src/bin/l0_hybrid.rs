@@ -134,7 +134,17 @@ fn main() -> Result<()> {
     let load_enc_ms = load_enc_start.elapsed().as_secs_f64() * 1000.0;
     println!("  Encoder loaded: {:.1} ms", load_enc_ms);
 
-    // Encode audio
+    // Warmup: one throwaway encode to prime autotune cache + shader compilation
+    {
+        let warmup_start = Instant::now();
+        let dummy_mel: Tensor<Backend, 3> = Tensor::zeros([1, n_mels, 64], &encoder_device);
+        let warmup_out = model.encode_audio(dummy_mel);
+        let _ = warmup_out.slice([0..1, 0..1, 0..1]).to_data(); // force GPU sync
+        println!("  Warmup encode: {:.1} ms (primed autotune cache)",
+            warmup_start.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    // Encode audio (timed — should be fast now)
     let encode_start = Instant::now();
     let audio_embeds_tensor = model.encode_audio(mel_tensor);
     let [_, seq_len, d_model] = audio_embeds_tensor.dims();
@@ -183,6 +193,16 @@ fn main() -> Result<()> {
     let mut decoder = L0Decoder::new(config.clone(), weights, decode_ctx, band_config)?;
     let load_l0_ms = load_l0_start.elapsed().as_secs_f64() * 1000.0;
     println!("  L0 decoder ready: {:.1} ms", load_l0_ms);
+
+    // Warmup: one throwaway decode step to prime L0 kernel JIT + page faults
+    {
+        let warmup_start = Instant::now();
+        let mut dummy_hidden = decoder.embed_token(1); // BOS
+        let _ = decoder.decode_step(&mut dummy_hidden, 0);
+        decoder.reset(); // clear KV cache for real run
+        println!("  Warmup decode: {:.1} ms (primed L0 kernel + USM pages)",
+            warmup_start.elapsed().as_secs_f64() * 1000.0);
+    }
 
     // ─── Phase 3: Autoregressive Decode on L0 ────────────────────────────
 

@@ -14,6 +14,7 @@ use super::device::L0Context;
 use super::kernel::{L0Kernel, L0Module};
 use super::ocl_compile::OclCompiler;
 use super::spirv_gen::OPENCL_Q4_MATMUL;
+use super::sys;
 use super::usm::{UsmAllocator, UsmKvCache};
 use crate::models::layers::shannon_prime::{compress_kv_vector, decompress_kv_vector, BandConfig};
 use anyhow::Result;
@@ -28,6 +29,9 @@ pub struct L0DecodeContext {
     /// Pre-created kernel pool — avoids zeKernelCreate overhead per dispatch.
     /// Pool size = max ops in a single batch (3 for QKV projections).
     kernel_pool: Vec<L0Kernel>,
+    /// Reusable command list — avoids zeCommandListCreate/Destroy per dispatch.
+    /// Reset → append → close → submit → sync cycle instead.
+    reusable_cmd_list: sys::ze_command_list_handle_t,
 }
 
 /// Configuration for the L0 decoder.
@@ -76,6 +80,10 @@ impl L0DecodeContext {
         }
         tracing::info!("Pre-created kernel pool ({} kernels)", pool_size);
 
+        // Pre-create a reusable command list (avoids create/destroy per dispatch)
+        let reusable_cmd_list = ctx.create_command_list()?;
+        tracing::info!("Pre-created reusable command list");
+
         Ok(L0DecodeContext {
             ctx,
             allocator,
@@ -83,6 +91,7 @@ impl L0DecodeContext {
             q4_matmul_module,
             band_config: config.band_config,
             kernel_pool,
+            reusable_cmd_list,
         })
     }
 
@@ -138,7 +147,8 @@ impl L0DecodeContext {
     ///
     /// Computes: output = input × weights^T (with Q4 dequantization)
     /// All buffers must be USM allocations from this context's allocator.
-    /// Uses pre-created kernel from pool (zero kernel creation overhead).
+    /// Uses pre-created kernel from pool + reusable command list
+    /// (zero kernel creation overhead, zero command list create/destroy overhead).
     pub fn q4_matmul(
         &self,
         weights_ptr: *const u8,
@@ -164,7 +174,16 @@ impl L0DecodeContext {
         let groups_x = (n + 15) / 16;
         let groups_y = (b * m + 15) / 16;
 
-        kernel.dispatch(&self.ctx, groups_x, groups_y, 1)?;
+        // Reuse pre-created command list: reset → append → barrier → close → submit → sync
+        unsafe {
+            sys::zeCommandListReset(self.reusable_cmd_list);
+        }
+        kernel.append_to_command_list(self.reusable_cmd_list, groups_x, groups_y, 1)?;
+        unsafe {
+            sys::zeCommandListAppendBarrier(self.reusable_cmd_list, std::ptr::null_mut(), 0, std::ptr::null());
+            sys::zeCommandListClose(self.reusable_cmd_list);
+        }
+        self.ctx.submit_and_sync(self.reusable_cmd_list)?;
         Ok(())
     }
 
@@ -174,6 +193,7 @@ impl L0DecodeContext {
     /// All buffers must be USM. The GPU executes them sequentially in one submission.
     /// Uses pre-created kernel pool — each op gets its own kernel object since L0
     /// does NOT capture args at append time (the kernel IS the arg state).
+    /// Reuses pre-created command list (zero create/destroy overhead).
     ///
     /// Max ops per call: 3 (pool size). Panics if exceeded.
     pub fn q4_matmul_batch(
@@ -186,7 +206,8 @@ impl L0DecodeContext {
         assert!(ops.len() <= self.kernel_pool.len(),
             "Batch size {} exceeds kernel pool size {}", ops.len(), self.kernel_pool.len());
 
-        let cmd_list = self.ctx.create_command_list()?;
+        // Reset reusable command list for new recording
+        unsafe { sys::zeCommandListReset(self.reusable_cmd_list); }
 
         for (idx, &(w_ptr, i_ptr, o_ptr, b, m, k, n)) in ops.iter().enumerate() {
             let blocks_per_row = k / 32;
@@ -203,18 +224,15 @@ impl L0DecodeContext {
 
             let groups_x = (n + 15) / 16;
             let groups_y = (b * m + 15) / 16;
-            kernel.append_to_command_list(cmd_list, groups_x, groups_y, 1)?;
+            kernel.append_to_command_list(self.reusable_cmd_list, groups_x, groups_y, 1)?;
         }
 
         // Barrier + close + submit + sync
         unsafe {
-            use super::sys;
-            use std::ptr;
-            sys::zeCommandListAppendBarrier(cmd_list, ptr::null_mut(), 0, ptr::null());
-            sys::zeCommandListClose(cmd_list);
+            sys::zeCommandListAppendBarrier(self.reusable_cmd_list, std::ptr::null_mut(), 0, std::ptr::null());
+            sys::zeCommandListClose(self.reusable_cmd_list);
         }
-        self.ctx.submit_and_sync(cmd_list)?;
-        unsafe { super::sys::zeCommandListDestroy(cmd_list); }
+        self.ctx.submit_and_sync(self.reusable_cmd_list)?;
         Ok(())
     }
 

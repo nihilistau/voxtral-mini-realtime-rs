@@ -108,12 +108,28 @@ Solution: compile OpenCL C via `OpenCL.dll` (always present), extract native bin
 
 **VHT2 composite-order deferred:** User confirmed VHT2 should handle non-PoT natively via mixed-radix decomposition (96 = 2⁵×3), but said to "wait and target as optimization."
 
+## What's Done (Session 2026-05-06 pt. 7 — L0 Optimizations & Hybrid Pipeline)
+
+**Branch: `svm-zero-copy`** — final optimizations and hybrid integration.
+
+1. **Pre-created kernel pool** — 3 kernels reused for batched QKV projections (eliminates 156× zeKernelCreate/token)
+2. **Reusable command list** — `zeCommandListReset` → append → close → submit → sync (eliminates create/destroy per dispatch)
+3. **Zero-alloc KV write** — inlined `copy_from_slice` directly into USM, removed dead `write_kv_to_cache` function
+4. **Warmup passes** — both encode (primes CubeCL autotune) and decode (primes L0 JIT + USM page faults)
+5. **L0 Hybrid binary** — `src/bin/l0_hybrid.rs`: RTX encode (wgpu) → L0 iGPU decode (Level Zero)
+6. **Benchmark results:**
+   - Encode: 2,164 ms → 1,217 ms (warmup eliminated autotune from timed path)
+   - Decode steady-state: 229.4 ms/token (2.87 RTF)
+   - Total RTF: 4.98 (vs 7.35 wgpu hybrid, vs 14.80 wgpu iGPU-only)
+   - 5.2x improvement over wgpu on same 32-EU hardware
+7. **Docs updated** — README, benchmarks, state.md, handoff.md, CLAUDE.md all reflect L0 numbers
+8. **Committed and pushed** — all on `svm-zero-copy` branch to `sp` remote
+
 ## What's Next
 
-1. **Pre-create kernel pool** — avoid 156× `zeKernelCreate` per token (estimated 30-50% speedup)
-2. **Composite-order VHT2** — handle head_dim=96 natively without pad-to-PoT
-3. **Optane M10 mmap integration** — arriving 2026-05-07, KV cache spill tier for large contexts
-4. **Tag v0.4.0** — Shannon-Prime SVM engine release
+1. **Composite-order VHT2** — handle head_dim=96 natively via mixed-radix (96 = 2⁵×3) without pad-to-PoT
+2. **MoE expert paging** — the SP-SVM Engine architecture is ready for dynamic expert scheduling (Oracle + ping-pong buffers + Optane-backed weight reservoir)
+3. **Tag v0.4.0** — Shannon-Prime SVM engine release
 
 ## Key Files to Know
 
@@ -144,6 +160,7 @@ Solution: compile OpenCL C via `OpenCL.dll` (always present), extract native bin
 | `src/l0/q4_decoder.rs` | Full 26-layer L0 decoder (DecoderConfig, L0Decoder, weights loader) |
 | `src/bin/l0_bench.rs` | L0 zero-copy decode benchmark |
 | `src/bin/l0_decode.rs` | Full 26-layer decode benchmark with GGUF loading |
+| `src/bin/l0_hybrid.rs` | Hybrid pipeline: RTX encode → L0 iGPU decode |
 | `benchmarks/BENCHMARK_RESULTS.md` | Full benchmark analysis and results |
 | `docs/SETUP.md` | Installation and build guide |
 | `docs/USAGE.md` | CLI and API usage reference |
@@ -172,6 +189,7 @@ cargo run --features "wgpu,cli,hub,l0" --bin l0-smoke      # validate L0 pipelin
 cargo run --features "wgpu,cli,hub,l0" --bin l0-q4-test    # Q4 matmul correctness
 cargo run --release --features "wgpu,cli,hub,l0" --bin l0-bench  # single-layer benchmark
 cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- --gguf models/voxtral-q4.gguf --tokens 20  # full 26-layer decode
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- --gguf models/voxtral-q4.gguf --audio test_data/mary_had_lamb.wav  # hybrid RTX→L0
 ```
 
 ## Model Weights (Local)

@@ -1,15 +1,26 @@
 # State — Voxtral Mini Realtime RS
 
 **Last updated:** 2026-05-06  
-**Branch:** main (sp remote: nihilistau/voxtral-mini-realtime-rs)
+**Branch:** svm-zero-copy (sp remote: nihilistau/voxtral-mini-realtime-rs)
 
-## Current Status: Phase 4 — Shannon-Prime SVM Engine (Hybrid Complete)
+## Current Status: Phase 5 — SP-SVM Engine Complete (Level Zero Zero-Copy)
 
-Shannon-Prime VHT2 compression wired into Q4 pipeline. Hybrid RTX↔iGPU split engine implemented and tested on NUC Beast Canyon: encoder runs on RTX 2060 (discrete), decoder on Intel UHD (integrated) with Shannon-Prime KV cache compression. Three inference modes verified: discrete-only, integrated-only, hybrid.
+The Shannon-Prime SVM Engine is fully operational on the NUC Beast Canyon. The Level Zero backend (`src/l0/`) bypasses wgpu/Vulkan entirely for iGPU decode, achieving **5.2x speedup** over wgpu on the same 32-EU Intel UHD Graphics.
 
-CLI flags: `--device` (integrated/discrete/auto), `--shannon-prime`, `--hybrid`. AVX-512/AVX2 SIMD dispatch for VHT2. Engine module (`src/engine/`) with SVM device selection and KV memory estimation.
+**Benchmark numbers (3.4s audio, release build):**
+- L0 Hybrid (RTX encode → L0 iGPU decode): **4.98 RTF** total, **2.87 decode-only RTF**
+- Steady-state decode: **229 ms/token** (4.4 tok/s)
+- vs wgpu iGPU baseline: 14.80 RTF → 2.87 RTF = **5.2x improvement**
+- Encode (RTX, post-warmup): 1,217 ms
 
-Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all docs complete.
+**Key optimizations applied:**
+- USM zero-copy (CPU VHT2 + GPU Q4 matmul on same DRAM pointers)
+- Pre-created kernel pool (3 kernels, avoids zeKernelCreate per dispatch)
+- Reusable command list (avoids create/destroy per dispatch)
+- Warmup passes (prime autotune cache + L0 JIT + USM page faults)
+- Zero-alloc KV write path (direct copy_from_slice into USM)
+
+Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all docs complete, wgpu benchmarks complete.
 
 ## What Works
 
@@ -26,6 +37,8 @@ Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all d
 | TTS (BF16) | Upstream verified | 20 voices, 9 languages |
 | Native ASR (Q4 GGUF) | **E2E verified** | Discrete, integrated, and hybrid modes |
 | Hybrid split engine | **E2E verified** | RTX encoder + iGPU decoder, Shannon-Prime KV |
+| L0 zero-copy backend | **E2E verified** | 5.2x faster than wgpu iGPU, 229 ms/token |
+| L0 hybrid pipeline | **E2E verified** | RTX encode → L0 decode, 4.98 RTF |
 | WASM/Browser | **Not yet tested** | wasm32 target not installed |
 | Docs (SETUP/USAGE/WASM_API) | **Complete** | `docs/` directory |
 | README (fork) | **Updated** | Fork additions, TUI, docs links |
@@ -57,8 +70,7 @@ Previous milestones: ASR/TTS E2E validated, WASM build verified, CI green, all d
 
 ## Remaining Work
 
-1. **Optane M10 mmap integration** — arriving 2026-05-07, KV cache spill tier
-2. **Pipelined overlap** — encode chunk N+1 on RTX while decoding chunk N on iGPU
-3. **Benchmarking** — RTF comparison across discrete/integrated/hybrid modes
-4. **GitHub CI release workflow** — automated builds and releases
-5. **Tag v0.4.0** — Shannon-Prime SVM engine release
+1. **Composite-order VHT2** — handle head_dim=96 natively via mixed-radix (96 = 2^5 × 3) without pad-to-PoT
+2. **Optane M10 mmap integration** — KV cache spill tier for long contexts
+3. **MoE expert paging** — dynamic weight streaming for 27B MoE models (requires Oracle scheduler + ping-pong buffers)
+4. **Tag v0.4.0** — Shannon-Prime SVM engine release

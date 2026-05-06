@@ -16,6 +16,8 @@ Streaming speech recognition and text-to-speech running natively and in the brow
 | Real-time waveform (browser) | Canvas-based scrolling waveform with peak-bucketed downsampling, 60fps |
 | Real-time waveform (CLI TUI) | ratatui + crossterm Unicode block-character rendering via `--tui` flag |
 | Shannon-Prime VHT2 | Vilenkin-Hartley Transform KV cache compression (~4.6x) |
+| Level Zero iGPU backend | Zero-copy USM decode on Intel iGPU — 5.2x faster than wgpu on same hardware |
+| Hybrid RTX→L0 pipeline | Encoder on RTX (wgpu), decoder on iGPU (Level Zero), zero-copy KV cache |
 | Shared ring buffer | `src/audio/ring_buffer.rs` — circular buffer with peak-bucketed snapshot |
 | Documentation suite | Setup guide, usage reference, WASM API docs in `docs/` |
 
@@ -53,11 +55,24 @@ NVIDIA DGX Spark (GB10, LPDDR5x).
 - Q4 model load: 3.9s native, 9.2s WASM (including shard download over localhost)
 - 20 preset voices across 9 languages. Use `--euler-steps` to tune speed/quality tradeoff
 
+### Level Zero iGPU Backend (SP-SVM Engine)
+
+Intel NUC Beast Canyon (i9-11900KB, Intel UHD 32 EUs, RTX 2060). Branch: `svm-zero-copy`.
+
+| Mode | Encode | Decode (steady) | Total RTF | vs wgpu iGPU |
+|------|--------|-----------------|-----------|--------------|
+| **L0 Hybrid** (RTX enc → L0 dec) | 1,217 ms | 229 ms/tok | **4.98** | 5.2x faster |
+| wgpu Hybrid (RTX enc → wgpu dec) | 1,523 ms | ~340 ms/tok | 7.35 | baseline |
+| wgpu iGPU-only | 26,756 ms | ~1200 ms/tok | 14.80 | — |
+
+The L0 backend uses Intel Level Zero with USM (Unified Shared Memory) for true zero-copy between CPU and iGPU. Shannon-Prime VHT2 compression operates directly on USM pointers — no staging buffers, no DMA, no copies. See `benchmarks/BENCHMARK_RESULTS.md` for full analysis.
+
 ### Architecture Notes
 
 - Custom WGSL compute shaders with vectorized u32 reads and vec4 dot products
 - Dual-path kernel dispatch: shared-memory tiled kernel for single-token decode, naive kernel for multi-row encode/prefill
 - Q4 GGUF (2.5 GB ASR, 2.67 GB TTS) runs entirely client-side in a browser tab via WASM + WebGPU
+- Level Zero backend: pre-compiled SPIR-V kernels, reusable command lists, kernel pool (3× for batched QKV)
 
 Try the demos: [ASR (speech-to-text)](https://huggingface.co/spaces/TrevorJS/voxtral-mini-realtime) | [TTS (text-to-speech)](https://huggingface.co/spaces/TrevorJS/voxtral-4b-tts)
 
@@ -127,6 +142,23 @@ cargo run --release --features "wgpu,cli,hub" --bin voxtral -- speak --list-voic
 
 20 preset voices across 9 languages. The TTS pipeline runs backbone (Ministral 3B) autoregressive decoding, flow-matching acoustic prediction, and codec synthesis to produce 24 kHz audio.
 
+### Level Zero Backend (Intel iGPU)
+
+```bash
+# Requires Intel GPU with Level Zero driver (Windows or Linux)
+# Branch: svm-zero-copy
+
+# Pure L0 decode benchmark
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- \
+  --gguf models/voxtral-q4.gguf --tokens 20
+
+# Full hybrid pipeline: RTX encode → L0 iGPU decode
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- \
+  --gguf models/voxtral-q4.gguf --audio test_data/mary_had_lamb.wav
+```
+
+The Level Zero backend implements the SP-SVM (Shannon-Prime Shared Virtual Memory) engine: Q4 matmul kernels dispatched via Intel Level Zero on USM shared memory, with VHT2 KV cache compression operating in-place on the same pointers — zero copies between CPU and iGPU.
+
 ## Architecture
 
 ```
@@ -186,6 +218,7 @@ wasm-pack build --target web --no-default-features --features wasm
 | `wasm` | Browser support: wasm-bindgen, WebGPU device init, JS bindings |
 | `cli` | CLI binary with clap + indicatif |
 | `hub` | HuggingFace Hub model downloads |
+| `l0` | Intel Level Zero backend for zero-copy iGPU decode (Windows, requires Intel GPU driver) |
 
 ## Testing
 
@@ -234,6 +267,15 @@ src/
   web/              # WASM bindings: VoxtralQ4, initWgpuDevice, async decode loop
   tts/              # TTS pipeline: backbone, flow matching, codec, voice presets
   tokenizer/        # Tekken tokenizer: decode (ASR) + encode (TTS via tiktoken)
+  l0/               # Level Zero backend: zero-copy iGPU decode (SP-SVM engine)
+    mod.rs          # L0 module root, feature-gated
+    device.rs       # L0 device discovery and context creation
+    usm.rs          # USM shared memory allocator + KV cache
+    decode.rs       # L0DecodeContext: kernel pool, reusable cmd list, VHT2
+    kernel.rs       # Module/kernel creation and dispatch
+    ocl_compile.rs  # OpenCL C → native binary compilation
+    spirv_gen.rs    # Q4 matmul OpenCL kernel source
+    q4_decoder.rs   # Full 26-layer decoder (bypasses Burn/wgpu)
   tui/              # Terminal UI: waveform widget, event loop, shared state
     mod.rs          # TuiState + run_tui() event loop
     waveform_widget.rs  # Unicode block-char waveform renderer

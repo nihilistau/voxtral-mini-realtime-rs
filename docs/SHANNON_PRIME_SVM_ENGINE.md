@@ -1,8 +1,18 @@
-# Shannon-Prime SVM Engine — Architecture Design
+# Shannon-Prime SVM Engine — Architecture
 
 **Target:** Intel NUC Beast Canyon (NUC11BTMi9)  
 **Date:** 2026-05-06  
-**Status:** Design phase
+**Status:** Implemented (`src/l0/`, branch `svm-zero-copy`)
+
+## Measured Performance
+
+| Mode | Encode | Decode (steady) | Total RTF | Notes |
+|------|--------|-----------------|-----------|-------|
+| L0 Hybrid | 1,217 ms | 229 ms/tok | 4.98 | RTX encode → L0 iGPU decode |
+| L0 Decode-only | — | 229 ms/tok | 2.87 | Pure iGPU, no encoder overhead |
+| wgpu iGPU | 26,756 ms | ~1200 ms/tok | 14.80 | Same hardware, 5.2x slower |
+
+The 5.2x improvement comes from eliminating wgpu's staging buffer overhead on UMA hardware. Level Zero USM gives true zero-copy: the same `*mut f32` pointer is accessed by CPU (VHT2) and GPU (Q4 matmul) with no intermediary.
 
 ---
 

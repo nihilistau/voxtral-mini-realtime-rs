@@ -57,6 +57,16 @@ cargo run --features "wgpu,cli,hub" --bin voxtral -- \
 cargo run --features "wgpu,cli,hub" --bin voxtral -- \
   speak --text "Hello world" --gguf models/voxtral-tts-q4.gguf --euler-steps 3
 
+# Level Zero backend (Intel iGPU zero-copy decode)
+cargo build --release --features "wgpu,cli,hub,l0"
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-smoke          # validate pipeline
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-q4-test        # Q4 correctness
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-bench          # single-layer benchmark
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- \
+  --gguf models/voxtral-q4.gguf --tokens 20                              # full 26-layer decode
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- \
+  --gguf models/voxtral-q4.gguf --audio test_data/mary_had_lamb.wav      # RTX encode → L0 decode
+
 # Dev HTTPS server for browser testing
 bun serve.mjs
 ```
@@ -70,9 +80,10 @@ native-tokenizer  # Tekken BPE encoding via tiktoken-rs (WASM-compatible)
 wasm              # WASM bindings: enables wgpu + wasm-bindgen + web-sys + dep:wgpu
 cli               # clap + indicatif for voxtral-transcribe and voxtral-speak binaries
 hub               # hf-hub for model downloads
+l0                # Intel Level Zero zero-copy iGPU decode (libloading + naga for SPIR-V)
 ```
 
-The `wasm` feature enables both `wgpu` (for burn's WebGPU backend) and `dep:wgpu` (direct wgpu crate access for custom device init). The `gguf` module is gated behind `wgpu`. The `web` module is gated behind `wasm`.
+The `wasm` feature enables both `wgpu` (for burn's WebGPU backend) and `dep:wgpu` (direct wgpu crate access for custom device init). The `gguf` module is gated behind `wgpu`. The `web` module is gated behind `wasm`. The `l0` module requires an Intel GPU with Level Zero driver installed.
 
 ## Model Weights
 

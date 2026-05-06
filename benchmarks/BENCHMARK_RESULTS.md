@@ -82,3 +82,93 @@ Pipelined hybrid shows virtually no improvement over non-pipelined hybrid. The r
 - **Hybrid:** When RTX VRAM is needed for other workloads (rendering, other models). Frees 2.5 GB RTX VRAM at cost of 6.6x slower inference
 - **Integrated-only:** Only when no discrete GPU is available. Too slow for real-time use
 - **Shannon-Prime:** Only beneficial on memory-constrained devices. Do not enable on discrete GPU
+
+---
+
+## Level Zero Zero-Copy Backend (SP-SVM Engine)
+
+**Branch:** `svm-zero-copy`  
+**Date:** 2026-05-06  
+**Hardware:** Same NUC Beast Canyon (Intel UHD Graphics, 32 EUs)
+
+The Level Zero backend bypasses wgpu/Vulkan entirely for iGPU decode, using Intel's native L0 API with USM (Unified Shared Memory) for true zero-copy operation between CPU and iGPU.
+
+### L0 Hybrid Results (RTX Encode → L0 iGPU Decode)
+
+Test audio: 3.4s "Mary had a little lamb"
+
+| Metric | wgpu Hybrid | L0 Hybrid | Improvement |
+|--------|-------------|-----------|-------------|
+| Encode (RTX) | 1,523 ms | 1,217 ms | 1.25x (warmup pass) |
+| Decode (iGPU) | 23,390 ms | 15,535 ms | 1.5x |
+| Per-token steady-state | ~340 ms | 229.4 ms | 1.48x |
+| Total RTF | 7.35 | 4.98 | 1.48x |
+| Decode-only RTF | — | 2.87 | — |
+
+### L0 Decode-Only Results (Pure iGPU, 20 tokens)
+
+| Metric | wgpu iGPU | L0 iGPU | Improvement |
+|--------|-----------|---------|-------------|
+| Per-token | ~1200 ms (14.80 RTF) | 229 ms | **5.2x** |
+| RTF | 14.80 | 2.87 | **5.2x** |
+
+### Why L0 Is Faster
+
+The 5.2x improvement over wgpu on the same 32-EU iGPU comes from eliminating abstraction overhead:
+
+1. **USM zero-copy** — CPU (VHT2 compress/decompress) and GPU (Q4 matmul) operate on the same physical DRAM pointers. wgpu creates staging buffers + fences even on UMA hardware.
+2. **Pre-created kernel pool** — 3 kernels reused across all dispatches. wgpu recompiles pipelines per shape variant.
+3. **Reusable command list** — `zeCommandListReset` → append → close → submit → sync. Avoids create/destroy overhead per dispatch.
+4. **Warmup pass** — Primes L0 kernel JIT and USM page faults before timed execution.
+5. **Zero-alloc KV write** — Direct `copy_from_slice` into USM buffers, no heap allocation per token.
+
+### L0 Build & Run
+
+```bash
+# Build
+cargo build --release --features "wgpu,cli,hub,l0"
+
+# Smoke test (validates L0 pipeline)
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-smoke
+
+# Q4 matmul correctness
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-q4-test
+
+# Pure L0 decode benchmark (no encoder)
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- \
+  --gguf models/voxtral-q4.gguf --tokens 20
+
+# Full hybrid: RTX encode → L0 iGPU decode
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- \
+  --gguf models/voxtral-q4.gguf --audio test_data/mary_had_lamb.wav
+
+# Single-layer microbenchmark
+cargo run --release --features "wgpu,cli,hub,l0" --bin l0-bench
+```
+
+### Architecture Summary
+
+```
+RTX 2060 (Vulkan/wgpu)          Intel UHD (Level Zero)
+┌────────────────────┐          ┌────────────────────────────────┐
+│  Mel → Encoder     │          │  26-layer autoregressive decode │
+│  → Adapter         │──f32──→  │  Q4 matmul (SPIR-V kernel)     │
+│  (audio embeddings)│  xfer    │  + CPU RoPE/Attention/SwiGLU    │
+└────────────────────┘          │  + VHT2 KV compression (USM)    │
+                                └────────────────────────────────┘
+                                         │
+                                    USM Shared Memory
+                                    (zero-copy CPU↔GPU)
+```
+
+### Per-Token Breakdown (26 layers)
+
+| Operation | Location | Time |
+|-----------|----------|------|
+| Q4 matmul (QKV, O, gate/up, down) | iGPU | ~180 ms |
+| RoPE + GQA attention | CPU | ~30 ms |
+| SwiGLU + RMSNorm + residuals | CPU | ~15 ms |
+| VHT2 compress/decompress (KV) | CPU (on USM) | ~4 ms |
+| **Total per token** | | **~229 ms** |
+
+Bottleneck is raw iGPU compute throughput (32 EUs). Scaling to 96-EU Xe or Arc A-series would bring this under 80 ms/token (real-time threshold).

@@ -22,9 +22,12 @@
 //! Gated behind the `assistant` feature and only built for non-wasm targets.
 
 pub mod asr;
+pub mod assets;
 pub mod audio_in;
 pub mod audio_out;
 pub mod config;
+pub mod filler;
+pub mod mixer;
 pub mod orchestrator;
 pub mod state;
 pub mod tts;

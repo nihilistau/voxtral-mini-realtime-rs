@@ -19,6 +19,8 @@ use tracing::{debug, info, warn};
 use crate::assistant::audio_in::{self, PcmChunk};
 use crate::assistant::audio_out::{self, AudioChunk, AudioOutCmd};
 use crate::assistant::config::AssistantConfig;
+use crate::assistant::filler;
+use crate::assistant::mixer::{self, MixerCmd};
 use crate::assistant::state::SessionState;
 use crate::assistant::vad::{Vad, VadFrame};
 use crate::tui::assistant_view::{
@@ -71,12 +73,26 @@ impl AssistantOrchestrator {
         let (vad_frame_tx, _) = broadcast::channel::<VadFrame>(256);
         let (transcript_tx, _) = broadcast::channel::<String>(32);
 
-        // ---- Audio I/O ------------------------------------------------------
-        let (audio_chunk_tx, audio_chunk_rx) = mpsc::channel::<AudioChunk>(64);
-        let out_handle = audio_out::spawn(cfg.clone(), audio_chunk_rx)
+        // ---- Audio I/O + mixer ----------------------------------------------
+        // Speaker pulls from the *mixed* stream produced by the mixer task.
+        // Synthesis sources (voice / filler / connection / ambient) push into
+        // the mixer; the mixer sums and forwards 20 ms chunks to audio_out.
+        let (mixed_tx, mixed_rx) = mpsc::channel::<AudioChunk>(64);
+        let out_handle = audio_out::spawn(cfg.clone(), mixed_rx)
             .context("spawning speaker output")?;
+        let mixer_handle = mixer::spawn(cfg.clone(), mixed_tx);
 
         let (in_handle, mic_rx) = audio_in::spawn(cfg.clone()).context("spawning mic capture")?;
+
+        // ---- Connection sound + ambient room tone --------------------------
+        filler::play_connection(cfg.as_ref(), &mixer_handle.connection_tx).await;
+        filler::spawn_ambient(cfg.clone(), mixer_handle.ambient_tx.clone());
+        // Filler manager — watches state for Thinking + filler_after timer.
+        filler::spawn(
+            cfg.clone(),
+            state_rx.clone(),
+            mixer_handle.filler_tx.clone(),
+        );
 
         // ---- Optional TUI ---------------------------------------------------
         let tui_state: Option<SharedAssistantViewState> = if cfg.tui {
@@ -173,22 +189,25 @@ impl AssistantOrchestrator {
         }
 
         // ---- ASR → echo → TTS task -----------------------------------------
+        // Voice goes into the mixer's voice channel (not directly to speaker).
         spawn_pipeline(
             cfg.clone(),
             utterance_rx,
-            audio_chunk_tx.clone(),
+            mixer_handle.voice_tx.clone(),
             state_tx.clone(),
             transcript_tx.clone(),
         );
 
         // ---- Barge-in supervisor -------------------------------------------
         // When VAD fires SpeechStart while the assistant is Speaking, flush
-        // the audio output and reset to Listening. Phase 3 will also cancel
-        // an in-flight LLM/TTS task; for Phase 1 we only stop the speaker.
+        // both the mixer's voice queue (drops queued TTS) and the speaker's
+        // jitter buffer (silences the in-flight chunk). Phase 3b will also
+        // cancel the LLM and roll back its KV cache here.
         {
             let mut vad_rx = vad_rx;
             let mut state_rx_clone = state_rx.clone();
-            let cmd_tx = out_handle.cmd_tx.clone();
+            let out_cmd_tx = out_handle.cmd_tx.clone();
+            let mixer_cmd_tx = mixer_handle.cmd_tx.clone();
             let state_tx = state_tx.clone();
             tokio::spawn(async move {
                 while let Some(evt) = vad_rx.recv().await {
@@ -196,8 +215,9 @@ impl AssistantOrchestrator {
                         VadEvent::SpeechStart => {
                             let cur = *state_rx_clone.borrow_and_update();
                             if matches!(cur, SessionState::Speaking) {
-                                info!("Barge-in detected; flushing speaker");
-                                let _ = cmd_tx.send(AudioOutCmd::Flush);
+                                info!("Barge-in detected; flushing voice + speaker");
+                                let _ = mixer_cmd_tx.send(MixerCmd::FlushVoice);
+                                let _ = out_cmd_tx.send(AudioOutCmd::Flush);
                                 let _ = state_tx.send(SessionState::Interrupted);
                                 let _ = state_tx.send(SessionState::Listening);
                             } else if matches!(cur, SessionState::Idle) {
@@ -224,7 +244,7 @@ impl AssistantOrchestrator {
         // Drop handles to stop streams.
         drop(in_handle);
         drop(out_handle);
-        drop(audio_chunk_tx);
+        drop(mixer_handle);
         drop(state_tx);
         let _ = state_rx; // silence unused
 

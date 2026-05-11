@@ -4,6 +4,8 @@
 //! alongside live transcription text. Used by the CLI `voxtral transcribe`
 //! and `voxtral speak` commands when running in interactive mode.
 
+#[cfg(all(feature = "assistant", not(target_family = "wasm")))]
+pub mod assistant_view;
 mod waveform_widget;
 
 pub use waveform_widget::WaveformWidget;

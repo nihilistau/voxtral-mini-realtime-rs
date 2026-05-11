@@ -21,6 +21,9 @@ use crate::assistant::audio_out::{self, AudioChunk, AudioOutCmd};
 use crate::assistant::config::AssistantConfig;
 use crate::assistant::state::SessionState;
 use crate::assistant::vad::{Vad, VadFrame};
+use crate::tui::assistant_view::{
+    AssistantViewState, SharedAssistantViewState, TranscriptRole,
+};
 
 /// Boundary event in the input stream — speech started, speech ended.
 #[derive(Debug, Clone)]
@@ -75,16 +78,99 @@ impl AssistantOrchestrator {
 
         let (in_handle, mic_rx) = audio_in::spawn(cfg.clone()).context("spawning mic capture")?;
 
+        // ---- Optional TUI ---------------------------------------------------
+        let tui_state: Option<SharedAssistantViewState> = if cfg.tui {
+            let st = Arc::new(std::sync::Mutex::new(AssistantViewState::new(
+                3.0,
+                cfg.audio.input_rate_hz,
+            )));
+            let st_for_thread = st.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = crate::tui::assistant_view::run(st_for_thread) {
+                    warn!(?e, "TUI exited with error");
+                }
+            });
+            Some(st)
+        } else {
+            None
+        };
+
         // ---- VHT2 VAD + utterance assembly ---------------------------------
         let (vad_tx, vad_rx) = mpsc::channel::<VadEvent>(16);
         let (utterance_tx, utterance_rx) = mpsc::channel::<Vec<f32>>(4);
+        // Bridge: tee mic chunks to both the VAD task and the TUI mic ring.
+        let (mic_to_vad_tx, mic_to_vad_rx) = mpsc::channel::<PcmChunk>(64);
+        {
+            let tui = tui_state.clone();
+            tokio::spawn(async move {
+                let mut mic_rx = mic_rx;
+                while let Some(chunk) = mic_rx.recv().await {
+                    if let Some(ref state) = tui {
+                        if let Ok(mut s) = state.lock() {
+                            s.mic_buf.push_slice(&chunk.samples);
+                        }
+                    }
+                    if mic_to_vad_tx.send(chunk).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
         spawn_vad(
             cfg.clone(),
-            mic_rx,
+            mic_to_vad_rx,
             vad_tx.clone(),
             utterance_tx.clone(),
             vad_frame_tx.clone(),
         );
+
+        // ---- TUI forwarders -------------------------------------------------
+        if let Some(ref tui) = tui_state {
+            // VAD frames → TUI spectrum/metrics.
+            {
+                let tui = tui.clone();
+                let mut rx = vad_frame_tx.subscribe();
+                tokio::spawn(async move {
+                    while let Ok(frame) = rx.recv().await {
+                        if let Ok(mut s) = tui.lock() {
+                            s.rms = frame.rms;
+                            s.entropy = frame.entropy;
+                            s.flatness = frame.flatness;
+                            s.vht2_power = frame.power;
+                        }
+                    }
+                });
+            }
+            // Transcripts → TUI history.
+            {
+                let tui = tui.clone();
+                let mut rx = transcript_tx.subscribe();
+                tokio::spawn(async move {
+                    while let Ok(text) = rx.recv().await {
+                        if let Ok(mut s) = tui.lock() {
+                            s.push_transcript(TranscriptRole::User, text.clone());
+                            s.push_transcript(TranscriptRole::Assistant, text);
+                        }
+                    }
+                });
+            }
+            // State transitions → TUI state pill.
+            {
+                let tui = tui.clone();
+                let mut rx = state_rx.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let label = (*rx.borrow_and_update()).label();
+                        if let Ok(mut s) = tui.lock() {
+                            s.state_label = label;
+                        }
+                        if rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
 
         // ---- ASR → echo → TTS task -----------------------------------------
         spawn_pipeline(

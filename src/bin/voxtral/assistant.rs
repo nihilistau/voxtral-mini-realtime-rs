@@ -82,9 +82,56 @@ pub struct Args {
     /// Disable the initial connection sound.
     #[arg(long)]
     pub no_connection_sound: bool,
+
+    /// Local LLM GGUF (Qwen2 family). Omit for echo mode.
+    #[cfg(feature = "llm")]
+    #[arg(long)]
+    pub llm_model: Option<PathBuf>,
+
+    /// Tokenizer JSON for the LLM (auto-downloaded from HF if missing).
+    #[cfg(feature = "llm")]
+    #[arg(long, default_value = "models/qwen2.5-0.5b-tokenizer.json")]
+    pub llm_tokenizer: PathBuf,
+
+    /// HuggingFace repo for the LLM tokenizer fallback.
+    #[cfg(feature = "llm")]
+    #[arg(long, default_value = "Qwen/Qwen2.5-0.5B-Instruct")]
+    pub llm_hf_repo: String,
+
+    /// System prompt prepended to every LLM turn.
+    #[cfg(feature = "llm")]
+    #[arg(
+        long,
+        default_value = "You are a concise spoken assistant. Reply in one short sentence."
+    )]
+    pub system_prompt: String,
+
+    /// Max tokens per LLM reply.
+    #[cfg(feature = "llm")]
+    #[arg(long, default_value_t = 120)]
+    pub llm_max_tokens: usize,
+
+    /// LLM sampling temperature. 0 = greedy.
+    #[cfg(feature = "llm")]
+    #[arg(long, default_value_t = 0.7)]
+    pub llm_temperature: f64,
 }
 
 pub fn run(args: Args) -> Result<()> {
+    #[cfg(feature = "llm")]
+    let llm_cfg = args.llm_model.as_ref().map(|path| {
+        voxtral_mini_realtime::assistant::llm::LlmConfig {
+            gguf_path: path.clone(),
+            tokenizer_path: args.llm_tokenizer.clone(),
+            hf_repo: args.llm_hf_repo.clone(),
+            max_new_tokens: args.llm_max_tokens,
+            temperature: args.llm_temperature,
+            top_p: 0.9,
+            seed: 42,
+            system_prompt: args.system_prompt.clone(),
+        }
+    });
+
     let cfg = AssistantConfig {
         asr_gguf: args.asr_gguf,
         tokenizer_path: args.tokenizer,
@@ -113,6 +160,8 @@ pub fn run(args: Args) -> Result<()> {
         shannon_prime: args.shannon_prime,
         max_kv_tokens: args.max_kv_tokens,
         tui: args.tui,
+        #[cfg(feature = "llm")]
+        llm: llm_cfg,
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

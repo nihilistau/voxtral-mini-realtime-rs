@@ -20,6 +20,8 @@ use crate::assistant::audio_in::{self, PcmChunk};
 use crate::assistant::audio_out::{self, AudioChunk, AudioOutCmd};
 use crate::assistant::config::AssistantConfig;
 use crate::assistant::filler;
+#[cfg(feature = "llm")]
+use crate::assistant::llm::{self, LlmEvent, LlmHandle};
 use crate::assistant::mixer::{self, MixerCmd};
 use crate::assistant::state::SessionState;
 use crate::assistant::vad::{Vad, VadFrame};
@@ -188,7 +190,27 @@ impl AssistantOrchestrator {
             }
         }
 
-        // ---- ASR → echo → TTS task -----------------------------------------
+        // ---- Optional local LLM --------------------------------------------
+        // When the `llm` feature is on and a model path is configured, spawn
+        // the LLM thread; otherwise the pipeline falls back to echo.
+        #[cfg(feature = "llm")]
+        let llm_pair: Option<(LlmHandle, tokio::sync::mpsc::UnboundedReceiver<LlmEvent>)> =
+            if let Some(lcfg) = cfg.llm.clone() {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<LlmEvent>();
+                match llm::spawn(lcfg, tx) {
+                    Ok(handle) => Some((handle, rx)),
+                    Err(e) => {
+                        warn!(?e, "Failed to spawn LLM; falling back to echo");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+        #[cfg(not(feature = "llm"))]
+        let llm_pair: Option<()> = None;
+
+        // ---- ASR → reply → TTS task ----------------------------------------
         // Voice goes into the mixer's voice channel (not directly to speaker).
         spawn_pipeline(
             cfg.clone(),
@@ -196,6 +218,7 @@ impl AssistantOrchestrator {
             mixer_handle.voice_tx.clone(),
             state_tx.clone(),
             transcript_tx.clone(),
+            llm_pair,
         );
 
         // ---- Barge-in supervisor -------------------------------------------
@@ -310,81 +333,183 @@ fn spawn_vad(
     });
 }
 
-/// Phase-1 pipeline: utterance → ASR → echo → TTS → speaker.
+/// Pipeline: utterance → ASR → (LLM | echo) → TTS → speaker.
+#[cfg(feature = "llm")]
 fn spawn_pipeline(
+    cfg: Arc<AssistantConfig>,
+    utterance_rx: mpsc::Receiver<Vec<f32>>,
+    audio_chunk_tx: mpsc::Sender<AudioChunk>,
+    state_tx: watch::Sender<SessionState>,
+    transcript_tx: broadcast::Sender<String>,
+    llm_pair: Option<(LlmHandle, tokio::sync::mpsc::UnboundedReceiver<LlmEvent>)>,
+) {
+    tokio::spawn(pipeline_loop(
+        cfg,
+        utterance_rx,
+        audio_chunk_tx,
+        state_tx,
+        transcript_tx,
+        llm_pair,
+    ));
+}
+
+#[cfg(not(feature = "llm"))]
+fn spawn_pipeline(
+    cfg: Arc<AssistantConfig>,
+    utterance_rx: mpsc::Receiver<Vec<f32>>,
+    audio_chunk_tx: mpsc::Sender<AudioChunk>,
+    state_tx: watch::Sender<SessionState>,
+    transcript_tx: broadcast::Sender<String>,
+    _: Option<()>,
+) {
+    tokio::spawn(pipeline_loop(
+        cfg,
+        utterance_rx,
+        audio_chunk_tx,
+        state_tx,
+        transcript_tx,
+    ));
+}
+
+#[cfg(feature = "llm")]
+async fn pipeline_loop(
+    cfg: Arc<AssistantConfig>,
+    mut utterance_rx: mpsc::Receiver<Vec<f32>>,
+    audio_chunk_tx: mpsc::Sender<AudioChunk>,
+    state_tx: watch::Sender<SessionState>,
+    transcript_tx: broadcast::Sender<String>,
+    mut llm_pair: Option<(LlmHandle, tokio::sync::mpsc::UnboundedReceiver<LlmEvent>)>,
+) {
+    while let Some(utt) = utterance_rx.recv().await {
+        let _ = state_tx.send(SessionState::Thinking);
+        let Some(transcript) = run_asr(&cfg, utt, &state_tx).await else { continue; };
+        let _ = transcript_tx.send(transcript.clone());
+        if transcript.trim().is_empty() {
+            let _ = state_tx.send(SessionState::Listening);
+            continue;
+        }
+        let reply = match llm_pair.as_mut() {
+            Some((handle, rx)) => {
+                match generate_reply(handle, rx, &transcript).await {
+                    Some(r) if !r.trim().is_empty() => r,
+                    _ => transcript.clone(),
+                }
+            }
+            None => transcript.clone(),
+        };
+        run_tts_and_stream(&cfg, &reply, &audio_chunk_tx, &state_tx).await;
+    }
+}
+
+#[cfg(not(feature = "llm"))]
+async fn pipeline_loop(
     cfg: Arc<AssistantConfig>,
     mut utterance_rx: mpsc::Receiver<Vec<f32>>,
     audio_chunk_tx: mpsc::Sender<AudioChunk>,
     state_tx: watch::Sender<SessionState>,
     transcript_tx: broadcast::Sender<String>,
 ) {
-    tokio::spawn(async move {
-        while let Some(utt) = utterance_rx.recv().await {
-            let _ = state_tx.send(SessionState::Thinking);
-            let t0 = Instant::now();
-            // ASR via spawn_blocking — Burn/cubecl needs a blocking context.
-            let cfg_a = cfg.clone();
-            let asr_result = tokio::task::spawn_blocking(move || crate::assistant::asr::transcribe(&cfg_a, &utt)).await;
-            let transcript = match asr_result {
-                Ok(Ok(t)) => t,
-                Ok(Err(e)) => {
-                    warn!(?e, "ASR failed");
-                    let _ = state_tx.send(SessionState::Listening);
-                    continue;
-                }
-                Err(e) => {
-                    warn!(?e, "ASR task panicked");
-                    let _ = state_tx.send(SessionState::Listening);
-                    continue;
-                }
-            };
-            let asr_ms = t0.elapsed().as_millis();
-            info!(asr_ms, %transcript, "ASR done");
-            let _ = transcript_tx.send(transcript.clone());
-
-            if transcript.trim().is_empty() {
-                let _ = state_tx.send(SessionState::Listening);
-                continue;
-            }
-
-            // Phase-1 "LLM" = echo. Phase 2 swaps this for candle.
-            let reply = transcript.clone();
-
-            // TTS: Phase 1 generates the whole reply, then streams chunks.
-            let cfg_t = cfg.clone();
-            let tts_result = tokio::task::spawn_blocking(move || {
-                crate::assistant::tts::synthesize(&cfg_t, &reply)
-            })
-            .await;
-            let audio = match tts_result {
-                Ok(Ok(a)) => a,
-                Ok(Err(e)) => {
-                    warn!(?e, "TTS failed");
-                    let _ = state_tx.send(SessionState::Listening);
-                    continue;
-                }
-                Err(e) => {
-                    warn!(?e, "TTS task panicked");
-                    let _ = state_tx.send(SessionState::Listening);
-                    continue;
-                }
-            };
-
-            let _ = state_tx.send(SessionState::Speaking);
-            // Stream in 20 ms chunks.
-            let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
-            for window in audio.chunks(chunk) {
-                if audio_chunk_tx
-                    .send(AudioChunk {
-                        samples: window.to_vec(),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
+    while let Some(utt) = utterance_rx.recv().await {
+        let _ = state_tx.send(SessionState::Thinking);
+        let Some(transcript) = run_asr(&cfg, utt, &state_tx).await else { continue; };
+        let _ = transcript_tx.send(transcript.clone());
+        if transcript.trim().is_empty() {
             let _ = state_tx.send(SessionState::Listening);
+            continue;
         }
-    });
+        run_tts_and_stream(&cfg, &transcript, &audio_chunk_tx, &state_tx).await;
+    }
+}
+
+async fn run_asr(
+    cfg: &Arc<AssistantConfig>,
+    utt: Vec<f32>,
+    state_tx: &watch::Sender<SessionState>,
+) -> Option<String> {
+    let t0 = Instant::now();
+    let cfg_a = cfg.clone();
+    let asr_result = tokio::task::spawn_blocking(move || {
+        crate::assistant::asr::transcribe(&cfg_a, &utt)
+    })
+    .await;
+    let transcript = match asr_result {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => {
+            warn!(?e, "ASR failed");
+            let _ = state_tx.send(SessionState::Listening);
+            return None;
+        }
+        Err(e) => {
+            warn!(?e, "ASR task panicked");
+            let _ = state_tx.send(SessionState::Listening);
+            return None;
+        }
+    };
+    info!(asr_ms = t0.elapsed().as_millis() as u64, %transcript, "ASR done");
+    Some(transcript)
+}
+
+#[cfg(feature = "llm")]
+async fn generate_reply(
+    handle: &LlmHandle,
+    event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmEvent>,
+    prompt: &str,
+) -> Option<String> {
+    // Drain stale events first (from any prior cancelled generation).
+    while event_rx.try_recv().is_ok() {}
+    if handle.prompt_tx.send(prompt.to_string()).is_err() {
+        warn!("LLM channel closed");
+        return None;
+    }
+    let mut reply = String::new();
+    while let Some(evt) = event_rx.recv().await {
+        match evt {
+            LlmEvent::Token(piece) => reply.push_str(&piece),
+            LlmEvent::Done { reason, n_tokens, total_ms, ttft_ms } => {
+                info!(?reason, n_tokens, total_ms, ttft_ms, "LLM done");
+                break;
+            }
+        }
+    }
+    Some(reply)
+}
+
+async fn run_tts_and_stream(
+    cfg: &Arc<AssistantConfig>,
+    text: &str,
+    audio_chunk_tx: &mpsc::Sender<AudioChunk>,
+    state_tx: &watch::Sender<SessionState>,
+) {
+    let cfg_t = cfg.clone();
+    let text_owned = text.to_string();
+    let tts_result = tokio::task::spawn_blocking(move || {
+        crate::assistant::tts::synthesize(&cfg_t, &text_owned)
+    })
+    .await;
+    let audio = match tts_result {
+        Ok(Ok(a)) => a,
+        Ok(Err(e)) => {
+            warn!(?e, "TTS failed");
+            let _ = state_tx.send(SessionState::Listening);
+            return;
+        }
+        Err(e) => {
+            warn!(?e, "TTS task panicked");
+            let _ = state_tx.send(SessionState::Listening);
+            return;
+        }
+    };
+
+    let _ = state_tx.send(SessionState::Speaking);
+    let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
+    for window in audio.chunks(chunk) {
+        if audio_chunk_tx
+            .send(AudioChunk { samples: window.to_vec() })
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+    let _ = state_tx.send(SessionState::Listening);
 }

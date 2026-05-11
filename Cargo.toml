@@ -15,6 +15,17 @@ hub = ["hf-hub"]
 # Real-time conversational assistant (mic + speaker + tokio orchestrator).
 # Desktop only — gated off WASM.
 assistant = ["cli", "wgpu", "dep:tokio", "dep:cpal", "dep:rand"]
+# Real LLM via candle (pure Rust, no native deps). Loads GGUF Q4/F16
+# Qwen2.5 or Gemma. Enable on top of `assistant` for real token streaming;
+# the assistant feature alone uses an echo placeholder.
+llm = [
+    "assistant",
+    "hub",
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+]
 # Tekken BPE encoding via tiktoken (WASM-compatible, no C deps)
 native-tokenizer = ["tiktoken-rs"]
 # WASM/browser support - uses wgpu (WebGPU) backend for GPU inference
@@ -39,7 +50,7 @@ burn = { version = "0.20", default-features = false, features = ["std", "autodif
 cubecl = { version = "0.9", default-features = false, features = ["wgpu"] }
 
 # Tekken BPE encoding (tiktoken core, WASM-compatible)
-tiktoken-rs = { version = "0.9", optional = true }
+tiktoken-rs = { version = "0.10", optional = true }
 base64 = "0.22"
 
 # Audio processing
@@ -99,6 +110,12 @@ naga = { version = "29", features = ["wgsl-in", "spv-out"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "signal"], optional = true }
 cpal = { version = "0.15", optional = true }
 rand = { version = "0.8", optional = true }
+
+# Local LLM via candle (pure Rust GGUF inference, gated behind `llm` feature)
+candle-core = { version = "0.10", optional = true }
+candle-nn = { version = "0.10", optional = true }
+candle-transformers = { version = "0.10", optional = true }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"], optional = true }
 
 [dev-dependencies]
 criterion = "0.8"

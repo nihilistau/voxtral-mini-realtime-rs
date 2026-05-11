@@ -35,6 +35,11 @@ pub struct AssistantConfig {
 
     /// Render the Sesame-style TUI instead of plain log output.
     pub tui: bool,
+
+    /// Optional local LLM config. When `None`, the assistant echoes the
+    /// transcript instead of generating a reply.
+    #[cfg(feature = "llm")]
+    pub llm: Option<crate::assistant::llm::LlmConfig>,
 }
 
 /// Mic and speaker configuration.
@@ -149,6 +154,8 @@ mod tests {
             shannon_prime: false,
             max_kv_tokens: 4096,
             tui: false,
+            #[cfg(feature = "llm")]
+            llm: None,
         };
         assert_eq!(cfg.input_chunk_samples(), 320);
         assert_eq!(cfg.output_jitter_samples(), 1920);

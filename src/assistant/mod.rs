@@ -27,6 +27,8 @@ pub mod audio_in;
 pub mod audio_out;
 pub mod config;
 pub mod filler;
+#[cfg(feature = "llm")]
+pub mod llm;
 pub mod mixer;
 pub mod orchestrator;
 pub mod state;

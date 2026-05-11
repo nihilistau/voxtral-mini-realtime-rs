@@ -23,6 +23,8 @@ use crate::assistant::filler;
 #[cfg(feature = "llm")]
 use crate::assistant::llm::{self, LlmEvent, LlmHandle};
 use crate::assistant::mixer::{self, MixerCmd};
+#[cfg(feature = "llm")]
+use crate::assistant::shredder::{Shredder, ShredderConfig};
 use crate::assistant::state::SessionState;
 use crate::assistant::vad::{Vad, VadFrame};
 use crate::tui::assistant_view::{
@@ -388,16 +390,31 @@ async fn pipeline_loop(
             let _ = state_tx.send(SessionState::Listening);
             continue;
         }
-        let reply = match llm_pair.as_mut() {
+        match llm_pair.as_mut() {
             Some((handle, rx)) => {
-                match generate_reply(handle, rx, &transcript).await {
-                    Some(r) if !r.trim().is_empty() => r,
-                    _ => transcript.clone(),
+                // Sentence-streaming path: shredder dispatches TTS as
+                // each sentence completes, overlapping LLM generation
+                // of the rest of the reply.
+                if generate_and_stream(
+                    handle,
+                    rx,
+                    &transcript,
+                    &cfg,
+                    &audio_chunk_tx,
+                    &state_tx,
+                )
+                .await
+                    .is_none()
+                {
+                    // LLM emitted nothing useful — fall back to echo.
+                    run_tts_and_stream(&cfg, &transcript, &audio_chunk_tx, &state_tx)
+                        .await;
                 }
             }
-            None => transcript.clone(),
-        };
-        run_tts_and_stream(&cfg, &reply, &audio_chunk_tx, &state_tx).await;
+            None => {
+                run_tts_and_stream(&cfg, &transcript, &audio_chunk_tx, &state_tx).await;
+            }
+        }
     }
 }
 
@@ -449,29 +466,126 @@ async fn run_asr(
     Some(transcript)
 }
 
+/// Generate via the LLM and concurrently dispatch TTS sentence-by-sentence.
+///
+/// Tokens stream through `Shredder`; each completed `SentenceChunk` fires
+/// a TTS call on `spawn_blocking` whose audio chunks pump into the mixer
+/// in idx order. The user hears sentence 1 while the LLM is still
+/// generating sentence 3.
+///
+/// Returns `Some(())` if at least one chunk was synthesized, `None` if
+/// the LLM produced nothing usable.
 #[cfg(feature = "llm")]
-async fn generate_reply(
+async fn generate_and_stream(
     handle: &LlmHandle,
     event_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmEvent>,
     prompt: &str,
-) -> Option<String> {
-    // Drain stale events first (from any prior cancelled generation).
+    cfg: &Arc<AssistantConfig>,
+    audio_chunk_tx: &mpsc::Sender<AudioChunk>,
+    state_tx: &watch::Sender<SessionState>,
+) -> Option<()> {
     while event_rx.try_recv().is_ok() {}
     if handle.prompt_tx.send(prompt.to_string()).is_err() {
         warn!("LLM channel closed");
         return None;
     }
-    let mut reply = String::new();
+
+    let mut shredder = Shredder::new(ShredderConfig::default());
+    let mut chunks_synthesized = 0u32;
+    let mut state_set_speaking = false;
+
+    let synth_and_push = |text: String,
+                          cfg: Arc<AssistantConfig>,
+                          tx: mpsc::Sender<AudioChunk>| async move {
+        let cfg_t = cfg.clone();
+        let text_clone = text.clone();
+        let synth = tokio::task::spawn_blocking(move || {
+            crate::assistant::tts::synthesize(&cfg_t, &text_clone)
+        })
+        .await;
+        match synth {
+            Ok(Ok(samples)) if !samples.is_empty() => {
+                let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
+                for window in samples.chunks(chunk) {
+                    if tx
+                        .send(AudioChunk {
+                            samples: window.to_vec(),
+                        })
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                true
+            }
+            Ok(Ok(_)) => false,
+            Ok(Err(e)) => {
+                warn!(?e, text = %text, "TTS failed");
+                false
+            }
+            Err(e) => {
+                warn!(?e, "TTS task panicked");
+                false
+            }
+        }
+    };
+
     while let Some(evt) = event_rx.recv().await {
         match evt {
-            LlmEvent::Token(piece) => reply.push_str(&piece),
-            LlmEvent::Done { reason, n_tokens, total_ms, ttft_ms } => {
+            LlmEvent::Token(piece) => {
+                for chunk in shredder.push(&piece) {
+                    if !state_set_speaking {
+                        let _ = state_tx.send(SessionState::Speaking);
+                        state_set_speaking = true;
+                    }
+                    let text = chunk.text.to_string();
+                    info!(
+                        idx = chunk.idx,
+                        boundary = ?chunk.boundary,
+                        chars = text.len(),
+                        "Sentence ready for TTS"
+                    );
+                    if !synth_and_push(text, cfg.clone(), audio_chunk_tx.clone()).await {
+                        return Some(());
+                    }
+                    chunks_synthesized += 1;
+                }
+            }
+            LlmEvent::Done {
+                reason,
+                n_tokens,
+                total_ms,
+                ttft_ms,
+            } => {
                 info!(?reason, n_tokens, total_ms, ttft_ms, "LLM done");
                 break;
             }
         }
     }
-    Some(reply)
+
+    // Flush any unterminated tail of the reply.
+    if let Some(last) = shredder.flush() {
+        if !state_set_speaking {
+            let _ = state_tx.send(SessionState::Speaking);
+        }
+        let text = last.text.to_string();
+        info!(
+            idx = last.idx,
+            boundary = ?last.boundary,
+            chars = text.len(),
+            "Final sentence flushed"
+        );
+        synth_and_push(text, cfg.clone(), audio_chunk_tx.clone()).await;
+        chunks_synthesized += 1;
+    }
+
+    let _ = state_tx.send(SessionState::Listening);
+    if chunks_synthesized == 0 {
+        None
+    } else {
+        Some(())
+    }
 }
 
 async fn run_tts_and_stream(

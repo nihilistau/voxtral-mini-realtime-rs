@@ -19,16 +19,18 @@ pub struct Args {
     #[arg(long, default_value = "models/voxtral-q4.gguf")]
     pub asr_gguf: PathBuf,
 
-    /// Q4 GGUF TTS model (omit for ASR-only mode).
-    #[arg(long)]
+    /// Q4 GGUF TTS model. Defaults to the bundled location;
+    /// omit explicitly with --no-tts to disable.
+    #[arg(long, default_value = "models/voxtral-tts-q4-gguf/voxtral-tts-q4.gguf")]
     pub tts_gguf: Option<PathBuf>,
 
-    /// Tokenizer JSON (Tekken).
-    #[arg(long, default_value = "models/voxtral/tekken.json")]
+    /// Tokenizer JSON (Tekken). Tries `models/tekken.json` then falls back
+    /// to the TTS GGUF's parent directory.
+    #[arg(long, default_value = "models/tekken.json")]
     pub tokenizer: PathBuf,
 
     /// Voice preset directory.
-    #[arg(long, default_value = "models/voxtral-tts/voice_embedding")]
+    #[arg(long, default_value = "models/voxtral-tts-q4-gguf/voice_embedding")]
     pub voices_dir: PathBuf,
 
     /// Voice preset name.

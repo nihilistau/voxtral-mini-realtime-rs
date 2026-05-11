@@ -248,7 +248,7 @@ fn factorize_vht2(mut n: usize) -> Vec<usize> {
     let mut factors = Vec::new();
 
     // Extract factor of 3 first (processed at largest stride)
-    while n % 3 == 0 {
+    while n.is_multiple_of(3) {
         factors.push(3);
         n /= 3;
     }

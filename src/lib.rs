@@ -33,6 +33,9 @@ pub mod tui;
 #[cfg(feature = "l0")]
 pub mod l0;
 
+#[cfg(all(feature = "assistant", not(target_family = "wasm")))]
+pub mod assistant;
+
 #[cfg(feature = "wasm")]
 pub mod web;
 

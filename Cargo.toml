@@ -12,6 +12,9 @@ default = ["wgpu", "native-tokenizer"]
 wgpu = ["burn/wgpu"]
 cli = ["clap", "indicatif", "ratatui", "crossterm"]
 hub = ["hf-hub"]
+# Real-time conversational assistant (mic + speaker + tokio orchestrator).
+# Desktop only — gated off WASM.
+assistant = ["cli", "wgpu", "dep:tokio", "dep:cpal", "dep:rand"]
 # Tekken BPE encoding via tiktoken (WASM-compatible, no C deps)
 native-tokenizer = ["tiktoken-rs"]
 # WASM/browser support - uses wgpu (WebGPU) backend for GPU inference
@@ -91,6 +94,11 @@ rustc-hash = "1.1"
 # Level Zero backend (optional)
 libloading = { version = "0.8", optional = true }
 naga = { version = "29", features = ["wgsl-in", "spv-out"], optional = true }
+
+# Assistant orchestrator runtime (optional, desktop-only)
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "signal"], optional = true }
+cpal = { version = "0.15", optional = true }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 criterion = "0.8"

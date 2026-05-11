@@ -70,8 +70,13 @@ cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- \
 # Real-time conversational assistant (Sesame-AI-style)
 cargo run --release --features "wgpu,cli,hub,assistant" --bin voxtral -- \
   assistant --tui --hybrid --shannon-prime                                # full pipeline
-cargo run --release --features "wgpu,cli,hub,assistant" --bin voxtral -- \
-  assistant --no-ambient --no-connection-sound                            # minimal
+cargo run --release --features "wgpu,cli,hub,llm" --bin voxtral -- \
+  assistant --tui --llm-model "<path-to-qwen2.5-0.5b-q4.gguf>"            # with real LLM
+
+# Assistant benchmarks
+cargo bench --features "wgpu,cli,hub,assistant" --bench assistant         # VAD/VHT2/mixer microbench
+cargo run --release --features "wgpu,cli,hub,llm" --bin voxtral-bench-assistant -- \
+  --all --llm-model "<path-to-qwen-gguf>"                                 # stage RTF/TTFT/tok-per-sec
 
 # Dev HTTPS server for browser testing
 bun serve.mjs

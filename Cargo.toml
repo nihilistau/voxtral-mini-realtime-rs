@@ -134,6 +134,11 @@ path = "src/bin/e2e_bench.rs"
 required-features = ["wgpu", "cli"]
 
 [[bin]]
+name = "voxtral-bench-assistant"
+path = "src/bin/assistant_bench.rs"
+required-features = ["assistant"]
+
+[[bin]]
 name = "l0-smoke"
 path = "src/bin/l0_smoke.rs"
 required-features = ["l0"]
@@ -171,6 +176,11 @@ required-features = ["wgpu"]
 name = "q4_pipeline"
 harness = false
 required-features = ["wgpu"]
+
+[[bench]]
+name = "assistant"
+harness = false
+required-features = ["assistant"]
 
 # WASM library target
 [lib]

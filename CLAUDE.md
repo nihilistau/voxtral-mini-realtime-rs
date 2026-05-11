@@ -67,6 +67,12 @@ cargo run --release --features "wgpu,cli,hub,l0" --bin l0-decode -- \
 cargo run --release --features "wgpu,cli,hub,l0" --bin l0-hybrid -- \
   --gguf models/voxtral-q4.gguf --audio test_data/mary_had_lamb.wav      # RTX encode → L0 decode
 
+# Real-time conversational assistant (Sesame-AI-style)
+cargo run --release --features "wgpu,cli,hub,assistant" --bin voxtral -- \
+  assistant --tui --hybrid --shannon-prime                                # full pipeline
+cargo run --release --features "wgpu,cli,hub,assistant" --bin voxtral -- \
+  assistant --no-ambient --no-connection-sound                            # minimal
+
 # Dev HTTPS server for browser testing
 bun serve.mjs
 ```
@@ -81,9 +87,10 @@ wasm              # WASM bindings: enables wgpu + wasm-bindgen + web-sys + dep:w
 cli               # clap + indicatif for voxtral-transcribe and voxtral-speak binaries
 hub               # hf-hub for model downloads
 l0                # Intel Level Zero zero-copy iGPU decode (libloading + naga for SPIR-V)
+assistant         # Real-time conversational assistant (tokio + cpal + rand); desktop-only
 ```
 
-The `wasm` feature enables both `wgpu` (for burn's WebGPU backend) and `dep:wgpu` (direct wgpu crate access for custom device init). The `gguf` module is gated behind `wgpu`. The `web` module is gated behind `wasm`. The `l0` module requires an Intel GPU with Level Zero driver installed.
+The `wasm` feature enables both `wgpu` (for burn's WebGPU backend) and `dep:wgpu` (direct wgpu crate access for custom device init). The `gguf` module is gated behind `wgpu`. The `web` module is gated behind `wasm`. The `l0` module requires an Intel GPU with Level Zero driver installed. The `assistant` module is gated behind `cli` + `wgpu` and `not(target_family = "wasm")`.
 
 ## Model Weights
 
@@ -195,6 +202,45 @@ The browser imposes hard limits that drive most of the complexity in `src/gguf/`
 This fork adds Shannon-Prime VHT2 KV cache compression (`src/models/layers/shannon_prime.rs`). The module provides spectral-domain banded quantization using the Vilenkin-Hartley Transform, achieving ~4.6x KV cache compression with negligible quality impact. It wraps the existing `KVCache` transparently.
 
 Key types: `ShannonPrimeConfig`, `ShannonPrimeKVCache`, `BandConfig`.
+
+Public spectral helpers also available for general use: `vht2_f32_inplace(&mut [f32])`, `spectral_entropy(&[f32]) -> f32`, `spectral_flatness(&[f32]) -> f32`.
+
+## Real-Time Assistant (`src/assistant/`)
+
+Behind the `assistant` cargo feature, a Sesame-AI-style full-duplex conversational pipeline is built on top of the existing ASR + TTS + VHT2 stack. Desktop-only (gated `cfg(not(target_family = "wasm"))`).
+
+Architecture — every arrow is a tokio mpsc / watch / broadcast; no Arc<Mutex> in the hot path:
+
+```
+cpal mic ──► audio_in ──► mpsc<PcmChunk> ──► VAD (VHT2) ─┬─► utterance ─► ASR ──► transcript ─► LLM ─► TTS
+                                                          └─► broadcast<VadFrame> ──► TUI spectrum
+                                                                                                      │
+                              speaker ◄── audio_out ◄── mixer ◄─ voice / filler / connection / ambient
+                                                          ▲
+                              orchestrator (state machine) drives fillers, connection sound, barge-in flush
+```
+
+Modules:
+
+| File | Role |
+|---|---|
+| `assistant/orchestrator.rs` | Top-level supervisor + state machine, owns all task handles |
+| `assistant/state.rs` | `SessionState` enum: Idle / Listening / Thinking / Speaking / Interrupted |
+| `assistant/config.rs` | `AssistantConfig`, `AudioConfig`, `VadConfig`, `LatencyConfig` |
+| `assistant/audio_in.rs` | cpal mic capture with stateful linear resample to 16 kHz mono |
+| `assistant/audio_out.rs` | cpal speaker via `RingBuffer` jitter buffer + `Flush` command |
+| `assistant/vad.rs` | 32 ms Hann + VHT2 + entropy + flatness + adaptive noise floor, hysteresis |
+| `assistant/mixer.rs` | 4-source mixer (voice / filler / connection / ambient), soft-clip, 20 ms tick |
+| `assistant/assets.rs` | Procedurally synthesized connection chirp, ambient loop, filler bank |
+| `assistant/filler.rs` | Watches state for Thinking → races `filler_after` timer (default 100 ms) |
+| `assistant/asr.rs` | **Stub** — returns placeholder transcript. Real Q4 wiring TODO |
+| `assistant/tts.rs` | **Stub** — emits 880 Hz blip. Real Q4 wiring TODO |
+| `tui/assistant_view.rs` | Sesame-style ratatui dashboard (header pill, mic + spectrum, transcript) |
+| `bin/voxtral/assistant.rs` | `voxtral assistant` CLI subcommand |
+
+What works today (Phases 0, 1, 3, 4, 5, 6): mic capture, VHT2 VAD with hysteresis and adaptive noise floor, full mixer with connection/ambient/filler/voice channels, barge-in flush of both mixer voice queue and speaker jitter buffer, live TUI with VHT2 power spectrum + H(X) + RMS + flatness + state pill + transcript history, all behind a feature flag that keeps the WASM build clean.
+
+What's still stubbed: real Voxtral Q4 ASR (`assistant/asr.rs`), real Voxtral Q4 TTS (`assistant/tts.rs`), candle 135–360M LLM, pre-warmup hook, KV-cache rollback on barge-in. Each is a model-owning thread + sync mpsc bridge — designed to slot into the existing pipeline without touching the rest of the orchestrator.
 
 ## Project Management Files
 

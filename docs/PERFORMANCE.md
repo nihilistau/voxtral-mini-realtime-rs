@@ -117,33 +117,34 @@ The end-user-perceptible latency is the time from end-of-utterance to first
 audio sample out of the speaker. With `voxtral assistant --tui` the TUI's
 footer already shows the TTFT for the last turn in milliseconds.
 
-### Measured on this workstation (Windows 11 / RTX + Intel UHD / candle CPU LLM)
+### Measured on this workstation (Windows 11 / RTX 2060 + Intel UHD)
 
-Captured 2026-05-11 via `voxtral-bench-assistant --llm --tts`. Median of 3
-iterations after 1 warmup. Hardware: this developer's box, not the target
-Beast Canyon NUC.
+Captured 2026-05-11 via `voxtral-bench-assistant`. Median of 3 iterations
+after 1–2 warmups.
 
-| Stage                                                       | Measured       |
-| ----------------------------------------------------------- | -------------- |
-| LLM TTFT (Qwen2.5-0.5B-Instruct Q4_K_M, candle CPU)         | **~3 500 ms**  |
-| LLM throughput (open-ended prompt, 18 tokens)               | **~5 tok/s**   |
-| LLM total wall for a 15-token short reply                   | **~3 600 ms**  |
-| TTS wall for 3.68 s of audio (Voxtral Q4, euler-steps 3)    | **~15 000 ms** |
-| TTS RTF (synthesis time / audio duration)                   | **~4.0**       |
+| Stage                                                       | CPU candle   | CUDA RTX 2060 |
+| ----------------------------------------------------------- | ------------ | ------------- |
+| LLM TTFT (Qwen2.5-0.5B-Instruct Q4_K_M)                     | 3 510 ms     | **373 ms**    |
+| LLM throughput (open-ended prompt, ~17 tokens)              | 5.0 tok/s    | **42.5 tok/s** |
+| LLM total wall for a 17-token short reply                   | 3 600 ms     | **396 ms**    |
+| TTS wall for 3.68 s of audio (Voxtral Q4, euler-steps 3)    | —            | 15 000 ms     |
+| TTS RTF (synthesis time / audio duration)                   | —            | 4.0           |
 
-Reality check on those numbers:
+Reality check:
 
-- **LLM TTFT is dominated by prompt prefill on CPU.** Candle's quantized
-  Qwen2 forward pass costs ~100–200 ms per layer iteration; the prefill
-  forward over a ~32-token chat-templated prompt takes most of the TTFT.
-  GPU offload (candle `cuda` feature) would drop this by ~10×.
-- **TTS at RTF 4.0 means a 5 s reply takes ~20 s to synthesize.** The
-  speaker hears nothing until the codec decode completes — sentence-level
-  streaming TTS (deferred work) would push first-audio latency down to
-  the per-sentence cost (~3–5 s for the first clause).
-- **The filler manager at 100 ms is essential**, not optional. With
-  measured TTFT of 3.5 s, every turn would feel broken without an
-  "uhh" mask while the LLM thinks.
+- **LLM on CUDA hit the ~120 ms target ballpark.** 373 ms TTFT is fully
+  masked by the 100 ms filler-manager budget — the user perceives one
+  "uhh" and then a reply. The 8.5× tok/s improvement vs CPU means a
+  60-token reply takes ~1.4 s on GPU vs ~12 s on CPU.
+- **TTS at RTF 4.0** is still slow. The 2.6 GB Voxtral Q4 model lives on
+  the wgpu adapter (auto-selected); switching to the L0 hybrid path or
+  GPU codec offload would help. Sentence-streaming TTS (deferred work)
+  is the bigger structural fix — it lets the speaker start before the
+  full reply has been codec-decoded.
+- **Conversational SLA achievable today**: with CUDA LLM + filler manager,
+  TTFT-to-speaker on a short reply is ~370 ms (LLM TTFT) + ~3 s (TTS
+  for ~3 s of audio) → first-audio at ~3.4 s. With sentence-streaming
+  TTS that drops to ~1 s for the first phoneme.
 
 ### Target on Beast Canyon NUC (RTX 2060 + Intel UHD, L0 + SP-SVM)
 

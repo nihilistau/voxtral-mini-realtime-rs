@@ -54,7 +54,10 @@ End-to-end: Hann window × VHT2 × power × spectral_entropy × spectral_flatnes
 
 ## Stage-level results (voxtral-bench-assistant, release build)
 
-### LLM — Qwen2.5-0.5B-Instruct Q4_K_M (candle CPU)
+### LLM — Qwen2.5-0.5B-Instruct Q4_K_M
+
+Same prompt, same workstation, two backends. Both use the same candle
+0.10 `quantized_qwen2` model wrapper, only the device differs.
 
 ```
 target/release/voxtral-bench-assistant.exe --llm \
@@ -63,16 +66,40 @@ target/release/voxtral-bench-assistant.exe --llm \
   --llm-prompt "Briefly describe what real-time speech recognition is, in two sentences."
 ```
 
-| Iter   | Wall ms | TTFT ms | n_tokens | Reply length |
-| ------ | ------- | ------- | -------- | ------------ |
-| 0      | 3 599   | 3 510   | 18       | full sentence |
-| 1      | 3 408   | 3 407   | 18       | full sentence |
-| 2      | 3 750   | 3 657   | 18       | full sentence |
-| Median | 3 599   | 3 510   | —        | —             |
+**CPU candle** — built with `--features "wgpu,cli,hub,llm"`:
 
-**Aggregate tok/sec across all 3 timed runs:** ~5.0 tok/s on CPU candle.
-TTFT is dominated by prompt prefill (chat template = ~32 tokens). A
-GPU-offloaded build would drop this by ~10×.
+| Iter   | Wall ms | TTFT ms | n_tokens |
+| ------ | ------- | ------- | -------- |
+| 0      | 3 599   | 3 510   | 18       |
+| 1      | 3 408   | 3 407   | 18       |
+| 2      | 3 750   | 3 657   | 18       |
+| Median | 3 599   | 3 510   | —        |
+
+Aggregate ~5.0 tok/s.
+
+**CUDA RTX 2060 candle** — built with `--features "wgpu,cli,hub,llm-cuda"`
+(and `NVCC_PREPEND_FLAGS="-Xcompiler /Zc:preprocessor"` to appease CCCL):
+
+| Iter   | Wall ms | TTFT ms | n_tokens |
+| ------ | ------- | ------- | -------- |
+| 0      | 421     | 388     | 17       |
+| 1      | 396     | 373     | 17       |
+| 2      | 395     | 369     | 17       |
+| Median | 396     | 373     | —        |
+
+Aggregate **42.5 tok/s**.
+
+**Speedup vs CPU baseline:**
+
+| Metric           | CPU    | CUDA       | Speedup |
+| ---------------- | ------ | ---------- | ------- |
+| TTFT             | 3 510  | **373 ms** | **9.4×** |
+| Tok/sec          | 5.0    | **42.5**   | **8.5×** |
+| Wall (17 toks)   | 3 600  | **396 ms** | **9.1×** |
+
+TTFT under 400 ms is fully masked by the 100 ms filler-manager budget —
+the user perceives a single "uhh" before the response lands. With CPU
+candle the gap would yawn for ~3 s, breaking the conversational illusion.
 
 ### TTS — Voxtral Q4 GGUF, euler_steps=3, voice=casual_female
 

@@ -90,50 +90,59 @@ The 100 ms filler manager today picks from 4 generic "uhh / um / mmm"
 clips at random. That's worse than silence in some contexts — what the
 user actually wants is a contextual repair:
 
-| Trigger                                | Repair token            | Example                              |
-| -------------------------------------- | ----------------------- | ------------------------------------ |
-| LLM TTFT > 100 ms                      | `Filler` (uhh, mhm)     | bridge to first sentence             |
-| User pauses mid-sentence (VAD silence) | `Continue` ("go on")    | invite to resume                     |
-| Barge-in during reply                  | `InterruptAck`          | "sorry, you were saying"             |
-| Detected user correction               | `SelfCorrect`           | "oh wait, I see, you mean…"          |
-| Cold-session start                     | `Connect`               | the rising-tone chirp from v1        |
-| Long silence after reply               | `Backchannel` ("mhm")   | acknowledge user is thinking         |
+| Trigger                                | Repair token (`RepairKind`) | Example                          |
+| -------------------------------------- | --------------------------- | -------------------------------- |
+| LLM TTFT > 100 ms                      | `Filler` (uhh, mhm)         | bridge to first sentence         |
+| Long pause in `Listening`              | `Continue` ("go on")        | invite to resume                 |
+| Barge-in during reply                  | `InterruptAck`              | "sorry, you were saying"         |
+| Fast-follow utterance after our reply  | `SelfCorrect`               | "oh wait, you mean…"             |
+| Cold session, dwell > 2 s              | `ColdStartPatience`         | "hang on, getting set up"        |
+| Quiet acknowledgement during long user turn | `Backchannel` ("mhm")  | acknowledge user is thinking     |
 
-The selection is a small state machine in the orchestrator, not a
-classifier. Inputs: current `SessionState`, time since last state change,
-last user transcript length, whether barge-in just fired.
+The session-start chirp is *not* a `RepairKind` — it stays in
+`assistant::filler::play_connection` because it's a one-shot session
+lifecycle cue, not a dialog repair.
+
+Selection is a small state machine in `repair::decide()`, not a
+classifier. Inputs: current `SessionState`, time since last state
+change, time since last repair (per-kind cooldown), last user/reply
+timestamps, whether barge-in just fired. `decide()` is pure — the
+caller updates state via `RepairContext::mark_fired(kind, now)` after
+actually pushing the picked audio into the mixer.
 
 Repairs come from a tiny pre-rendered bank in `assets/repairs/` (or
 synthesized at startup via the TTS like the current filler bank). Each
 clip ≤ 800 ms so it fits inside any conversational gap.
 
-### `assistant::token_router` — token-ahead pre-warm (stub for now)
+### `assistant::routing` — token-ahead pre-warm + KV affinity
 
-CosySim's `TokenAheadRouter` dispatches tool calls as soon as the
-intent classifier (Gemma 270M) confidence-scores a `pre_warm` signal,
-~50 ms into the stream. For voice, equivalent pre-warms are:
+Both pieces live in one module since they share the "tier" vocabulary.
 
-- **TTS voice swap**: if the early tokens suggest a different speaker
-  ("Maria said…"), pre-warm that voice's embedding.
-- **Tool calls**: if intent is "play music", pre-warm the audio mixer
-  with the ambient track at -3 dB.
-- **Long-form**: if intent is "tell me a story", switch TTS to a slower
-  euler_steps for higher quality.
+**`routing::TokenAheadDispatcher`** — CosySim's `TokenAheadRouter`
+dispatches tool calls as soon as the intent classifier (Gemma 270M)
+confidence-scores a `pre_warm` signal, ~50 ms into the stream. For
+voice, equivalent pre-warms are:
 
-v2 ships the trait + dispatcher skeleton; concrete pre-warm actions go
-in later (and need actual tools to call).
+- **TTS voice swap** (`PreWarm::Voice`): if the early tokens suggest a
+  different speaker, pre-warm that voice's embedding.
+- **Long-form** (`PreWarm::HighQualityTts`): if intent is "tell me a
+  story", switch TTS to higher `euler_steps` for quality.
+- **Short response** (`PreWarm::FastTts`): if reply starts with "yes",
+  "no", "sure", "ok", switch TTS to faster `euler_steps`.
 
-### `assistant::kv_affinity` — agent → tier KV warmth tracking
+v2 ships the dispatcher skeleton with a small rule set; the larger
+intent-classifier-driven version is later work.
 
-CosySim's most non-obvious routing signal: `_agent_affinity` is a
-bounded LRU mapping each agent to the tier where their KV cache is warm.
-Switching tiers means re-prefilling; sticky affinity amortizes that.
+**`routing::AgentAffinity`** — CosySim's most non-obvious routing
+signal. A bounded LRU mapping each `voice_id` to the `Tier` (compute
+location) where their KV cache is warm. Switching tiers means
+re-prefilling the persona prefix; sticky affinity amortizes that.
 
 For voice, the "agent" is the *voice preset*. If the user has been
 talking to `casual_female` for 10 turns, the LLM's KV cache for that
 character's persona is warm. Switching to `cheerful_male` mid-session
-means recomputing the system-prompt prefix. The affinity tracker
-records last-used voice and biases router decisions toward it.
+means recomputing the system-prompt prefix. `AgentAffinity::record(voice_id, tier)`
+remembers last-used voice→tier and biases router decisions toward it.
 
 ## Mid-sentence repair — partial suffix surgery
 

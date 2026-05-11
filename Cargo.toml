@@ -26,6 +26,15 @@ llm = [
     "dep:candle-transformers",
     "dep:tokenizers",
 ]
+# CUDA backend for the candle LLM. Builds against the system CUDA toolkit
+# (NVCC + cuBLAS). Massive TTFT improvement vs CPU candle on NVIDIA cards
+# (~10–30× on Qwen 0.5B). Enable on top of `llm` for an RTX/CUDA system.
+llm-cuda = [
+    "llm",
+    "candle-core/cuda",
+    "candle-nn/cuda",
+    "candle-transformers/cuda",
+]
 # Tekken BPE encoding via tiktoken (WASM-compatible, no C deps)
 native-tokenizer = ["tiktoken-rs"]
 # WASM/browser support - uses wgpu (WebGPU) backend for GPU inference

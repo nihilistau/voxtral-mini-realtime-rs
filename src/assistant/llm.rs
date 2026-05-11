@@ -64,6 +64,26 @@ impl Default for LlmConfig {
     }
 }
 
+/// Pick the best available device for inference. Prefers CUDA when the
+/// `llm-cuda` cargo feature is on and a CUDA-capable adapter is reachable;
+/// otherwise falls back to CPU. Logs which one was chosen so the user can
+/// see it on startup.
+fn pick_device() -> Device {
+    #[cfg(feature = "llm-cuda")]
+    {
+        match Device::new_cuda(0) {
+            Ok(d) => {
+                tracing::info!("LLM using CUDA device 0");
+                return d;
+            }
+            Err(e) => {
+                tracing::warn!(?e, "CUDA device 0 unavailable; falling back to CPU");
+            }
+        }
+    }
+    Device::Cpu
+}
+
 /// Ensure the tokenizer is on disk. If `cfg.tokenizer_path` doesn't exist,
 /// download it from `cfg.hf_repo`/tokenizer.json via hf-hub and copy to
 /// the configured path so subsequent runs are offline.
@@ -146,9 +166,8 @@ fn run(
     prompt_rx: smpsc::Receiver<String>,
     event_tx: &tmpsc::UnboundedSender<LlmEvent>,
 ) -> Result<()> {
-    let device = Device::Cpu;
-
-    info!(path = %cfg.gguf_path.display(), "Loading LLM GGUF");
+    let device = pick_device();
+    info!(path = %cfg.gguf_path.display(), device = ?device, "Loading LLM GGUF");
     let mut file = File::open(&cfg.gguf_path)
         .with_context(|| format!("opening GGUF at {}", cfg.gguf_path.display()))?;
     let content = gguf_file::Content::read(&mut file).context("parsing GGUF metadata")?;

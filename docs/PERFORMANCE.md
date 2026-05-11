@@ -167,65 +167,115 @@ hardware), (2) sentence-streaming TTS (cuts perceived latency by ~5×),
 (3) L0 hybrid ASR for the iGPU decoder (~2× decode speedup per the
 existing benchmarks in `benchmarks/BENCHMARK_RESULTS.md`).
 
-## Storage tiering — does Optane matter here?
+## Memory & storage tiering
 
-Short answer: **not for the current size class**.
+This box has four tiers. The right answer is: **put the hot weights in VRAM,
+let DRAM be the spill, use Optane for cold-start / MoE / multi-model, and
+NVMe for archival only.**
 
-### The arithmetic
+### Tier latencies — actual numbers
 
-| Component             | Size       | mmap residency         |
-| --------------------- | ---------- | ---------------------- |
-| Voxtral Q4 ASR        | 2.5 GB     | full                   |
-| Voxtral Q4 TTS        | 2.7 GB     | full                   |
-| Qwen2.5-0.5B Q4       | 379 MB     | full                   |
-| Tokenizers + voices   | < 100 MB   | full                   |
-| LLM KV cache (4 k)    | ~50 MB     | hot per-turn           |
-| **Working set total** | **~5.7 GB** | comfortably in DRAM   |
+QD1 random read latencies, the metric that matters for autoregressive
+inference (every token = a chain of tiny dependent loads). These are the
+real "time-to-first-bit" numbers, not the marketing sequential throughput.
 
-On any machine with ≥ 16 GB RAM, the OS page cache holds all four GGUFs in
-the file cache after first-touch, so subsequent mmap reads are DRAM-speed
-(~100 ns / cache line). Optane (~2 µs page-in) is only faster than DRAM in
-the *first-touch* path and only beats NVMe (~50 µs page-in) for cold loads.
+| Tier                          | Random read latency | Capacity here | Notes                                  |
+| ----------------------------- | ------------------- | ------------- | -------------------------------------- |
+| RTX 2060 VRAM                 | **~5 ns** (GPU-local) / **~1 µs** (PCIe round-trip from CPU) | **12 GB** | Where the model *should* live          |
+| DDR4/5 DRAM                   | **~80–100 ns**      | 16–32 GB      | Page cache after mmap first-touch      |
+| Optane M10 (NVMe-attached)    | **~1 µs** (random 4K, QD1) | 16–64 GB | Byte-addressable-feel for small reads  |
+| TLC NVMe                      | **~50–100 µs** (random 4K, QD1) | TB+ | Sequential is fine, random is awful   |
+| SATA SSD                      | ~150 µs             | TB+           | Don't                                  |
 
-### When Optane would actually pay off
+The headline: Optane is ~50–100× faster than NVMe at QD1 small random
+reads. That's the *only* metric that matters when an attention layer chases
+KV pointers or an LLM samples from a tail of weights. Sequential throughput
+benchmarks don't measure what we care about.
 
-The Optane M10 acceleration story makes sense in three scenarios — none of
-which apply to today's pipeline:
+VRAM-from-GPU is *3 orders of magnitude* faster than DRAM-from-CPU for the
+operations the model actually runs (per-thread vector loads with massive
+parallelism). The PCIe ~1 µs round-trip only matters when the CPU has to
+touch a buffer the GPU owns — minimize those crossings, which is exactly
+what the SP-SVM USM design is for.
 
-1. **MoE expert paging**. A 27 B-parameter mixture-of-experts model with
-   active experts swapped in per token can't keep all weights in DRAM. The
-   `state.md` "MoE expert paging" + ping-pong buffer design is real future
-   work that needs Optane.
+### The arithmetic with this hardware
 
-2. **Multi-model hot-swap**. Switching between a 270 M router and a 7 B
-   deep model on demand. Loading 7 B weights from NVMe is ~5 s; from Optane
-   is ~250 ms. Today we only ship the 0.5 B model.
+| Component             | Size       | Best tier  | Reason                                |
+| --------------------- | ---------- | ---------- | ------------------------------------- |
+| Voxtral Q4 ASR        | 2.5 GB     | **VRAM**   | hot during every utterance            |
+| Voxtral Q4 TTS        | 2.7 GB     | **VRAM**   | hot during every reply                |
+| Qwen2.5-0.5B Q4       | 379 MB     | **VRAM**   | hot during every think step           |
+| Voice presets         | < 100 MB   | DRAM       | one-shot per turn                     |
+| Tokenizers            | < 50 MB    | DRAM       | CPU-side                              |
+| LLM KV cache (4 k)    | ~50 MB     | **VRAM**   | every-token read/write                |
+| **GPU-resident total**| **~5.6 GB** | of 12 GB available — 6 GB headroom |
 
-3. **KV cache spill for long contexts**. 32 k-token context on a small
-   model can exceed the per-process RAM budget; spilling old KV pages to
-   Optane vs NVMe shaves orders of magnitude off the swap cost. With our
-   4 k cap and ~50 MB worst-case KV, this never spills.
+**Everything fits in VRAM with 6 GB to spare.** That's the right loadout.
+
+Today the LLM runs on CPU through candle (no CUDA feature wired in), so
+the 0.5 B + KV cache + workspace lives in DRAM and chews through 100–200 ms
+per forward pass. Fixing that is the highest-impact change to TTFT —
+candle's `cuda` feature, `Device::Cuda(0)`, done.
+
+### When does Optane actually help?
+
+Now that we've put VRAM at the top, Optane's role is narrower but real:
+
+1. **Cold start.** mmap'd weights page in at ~1 µs/page from Optane vs
+   ~50 µs from NVMe. For a 2.5 GB ASR GGUF that's 600k pages → ~0.6 s
+   from Optane vs ~30 s from NVMe on a cold boot. After the page cache
+   warms up, DRAM serves subsequent reads and the source disk is
+   irrelevant.
+
+2. **Multi-model hot-swap.** Today we ship one 0.5 B router. The
+   architecture is meant to scale to a 270 M router + 7 B deep model
+   pair, swapping in the deep model on demand. Loading 7 B from NVMe is
+   ~5 s; from Optane is ~150 ms.
+
+3. **KV-cache spill for long contexts.** A 32 k-token context with a
+   reasonable model can exceed VRAM. Spilling old KV pages to Optane vs
+   NVMe is the difference between "noticeable hitch" and "session-killing
+   stall." With our current 4 k cap and small models this never trips.
+
+4. **MoE expert paging.** A future mixture-of-experts (the `state.md`
+   roadmap mentions 27 B MoE). Active experts swap in per token; Optane's
+   ~1 µs random read latency makes this viable, NVMe's ~50 µs doesn't.
+   See `docs/SHANNON_PRIME_SVM_ENGINE.md`.
 
 ### Current recommendation
 
-- Put the GGUFs on whatever drive is fastest *for cold start* (Optane M10
-  > NVMe > SATA SSD). After first launch they live in the page cache
-  anyway and the storage tier becomes irrelevant.
-- The `models/` directory in this worktree is a Windows junction to
-  `D:/F/shannon-prime-repos/voxtral-mini-realtime-rs/models/` — if your
-  Optane drive is mounted as e.g. `O:`, you can swap the junction target
-  for `O:/voxtral/models/` and rebuild the page cache there:
+- **Wire the candle `cuda` feature and pin the LLM to `Device::Cuda(0)`.**
+  Single biggest TTFT win available. Enabled via the `llm-cuda` cargo
+  feature:
+
+  ```bash
+  # Windows + CUDA 13.2 + MSVC 2022: nvcc's CCCL header requires the
+  # standard-conforming preprocessor in cl.exe. Set this env var so nvcc
+  # forwards /Zc:preprocessor to its host compiler:
+  set NVCC_PREPEND_FLAGS=-Xcompiler /Zc:preprocessor
+
+  cargo build --release --features "wgpu,cli,hub,llm-cuda" --bin voxtral
+  ```
+
+  The `pick_device()` helper in `src/assistant/llm.rs` tries
+  `Device::new_cuda(0)` first when the feature is on and falls back to
+  CPU with a warning if no CUDA card is reachable.
+- For ASR + TTS, Burn already picks the wgpu adapter — that already
+  uses VRAM. The `--hybrid` flag splits encoder (RTX) + decoder (Intel
+  UHD) for memory pressure, which is the right move when running all
+  three models simultaneously.
+- Put the GGUFs on the fastest random-read tier you have (Optane M10
+  > NVMe > SATA). The `models/` junction makes this swappable:
 
   ```powershell
   Remove-Item models -Recurse -Force
   New-Item -ItemType Junction -Path models -Target "O:\voxtral\models"
   ```
 
-- If/when we ship the MoE expert paging or multi-model router, the
-  `Q4ModelLoader` already mmap's via `BufReader<File>`, so swapping storage
-  is transparent — we'd add an LRU page-out policy in the SP-SVM Engine
-  layer, not the model loader. See `docs/SHANNON_PRIME_SVM_ENGINE.md` for
-  the architectural sketch.
+- If/when MoE expert paging or multi-model routing ships, the
+  `Q4ModelLoader` already mmap's via `BufReader<File>` so the storage
+  tier is transparent — LRU page-out lives in the SP-SVM Engine layer,
+  not the model loader.
 
 ## Reproducibility
 

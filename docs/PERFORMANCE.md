@@ -111,27 +111,61 @@ Reported per stage:
 The binary outputs human-readable lines plus a `=== JSON ===` block at the
 end suitable for CI assertions.
 
-## Conversational SLA
+## Conversational SLA — measured vs target
 
 The end-user-perceptible latency is the time from end-of-utterance to first
 audio sample out of the speaker. With `voxtral assistant --tui` the TUI's
 footer already shows the TTFT for the last turn in milliseconds.
 
-Target on the Beast Canyon NUC (Intel UHD iGPU + RTX 2060) with the L0
-hybrid pipeline + Shannon-Prime KV compression engaged, per `state.md`:
+### Measured on this workstation (Windows 11 / RTX + Intel UHD / candle CPU LLM)
+
+Captured 2026-05-11 via `voxtral-bench-assistant --llm --tts`. Median of 3
+iterations after 1 warmup. Hardware: this developer's box, not the target
+Beast Canyon NUC.
+
+| Stage                                                       | Measured       |
+| ----------------------------------------------------------- | -------------- |
+| LLM TTFT (Qwen2.5-0.5B-Instruct Q4_K_M, candle CPU)         | **~3 500 ms**  |
+| LLM throughput (open-ended prompt, 18 tokens)               | **~5 tok/s**   |
+| LLM total wall for a 15-token short reply                   | **~3 600 ms**  |
+| TTS wall for 3.68 s of audio (Voxtral Q4, euler-steps 3)    | **~15 000 ms** |
+| TTS RTF (synthesis time / audio duration)                   | **~4.0**       |
+
+Reality check on those numbers:
+
+- **LLM TTFT is dominated by prompt prefill on CPU.** Candle's quantized
+  Qwen2 forward pass costs ~100–200 ms per layer iteration; the prefill
+  forward over a ~32-token chat-templated prompt takes most of the TTFT.
+  GPU offload (candle `cuda` feature) would drop this by ~10×.
+- **TTS at RTF 4.0 means a 5 s reply takes ~20 s to synthesize.** The
+  speaker hears nothing until the codec decode completes — sentence-level
+  streaming TTS (deferred work) would push first-audio latency down to
+  the per-sentence cost (~3–5 s for the first clause).
+- **The filler manager at 100 ms is essential**, not optional. With
+  measured TTFT of 3.5 s, every turn would feel broken without an
+  "uhh" mask while the LLM thinks.
+
+### Target on Beast Canyon NUC (RTX 2060 + Intel UHD, L0 + SP-SVM)
+
+Aspirational targets from `state.md` once the L0 hybrid path is wired into
+the assistant. The current orchestrator uses the wgpu backend for ASR/TTS
+and CPU for LLM; the L0 path is sketched in but not yet plumbed into the
+assistant feature.
 
 | Hop                                                       | Target ms |
 | --------------------------------------------------------- | --------- |
-| Mic → VAD speech-end fires (after 8-frame hysteresis)     | ~256 ms   |
-| ASR encode (RTX) on a 2 s utterance                       | ~80 ms    |
+| Mic → VAD speech-end fires (8-frame hysteresis)           | ~256 ms   |
+| ASR encode (RTX) on 2 s utterance                         | ~80 ms    |
 | ASR decode + tokenize (L0 iGPU, Shannon-Prime KV)         | ~300 ms   |
-| LLM TTFT (Qwen2.5-0.5B Q4, CPU candle)                    | ~120 ms   |
-| TTS first audio frame (Voxtral Q4, euler-steps 3)         | ~150 ms   |
+| LLM TTFT (Qwen2.5-0.5B Q4 + GPU offload)                  | ~120 ms   |
+| TTS first audio frame (Voxtral Q4, streaming, euler 3)    | ~150 ms   |
 | **Total end-of-speech → first speaker sample**            | **~900 ms** |
 
-Below 900 ms is the "comfortable conversation" threshold in voice-UX
-research; below 600 ms is "feels like a person." Filler injection at 100 ms
-masks the gap when LLM TTFT > 100 ms, so perceived TTFT drops to that bound.
+Closing the gap from measured 4-5 s to target ~900 ms needs three pieces
+in order of impact: (1) GPU-offloaded LLM (~30× TTFT improvement on this
+hardware), (2) sentence-streaming TTS (cuts perceived latency by ~5×),
+(3) L0 hybrid ASR for the iGPU decoder (~2× decode speedup per the
+existing benchmarks in `benchmarks/BENCHMARK_RESULTS.md`).
 
 ## Storage tiering — does Optane matter here?
 

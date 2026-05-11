@@ -28,6 +28,7 @@ pub mod config;
 pub mod orchestrator;
 pub mod state;
 pub mod tts;
+pub mod vad;
 
 pub use config::AssistantConfig;
 pub use orchestrator::AssistantOrchestrator;

@@ -13,13 +13,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{debug, info, warn};
 
 use crate::assistant::audio_in::{self, PcmChunk};
 use crate::assistant::audio_out::{self, AudioChunk, AudioOutCmd};
 use crate::assistant::config::AssistantConfig;
 use crate::assistant::state::SessionState;
+use crate::assistant::vad::{Vad, VadFrame};
 
 /// Boundary event in the input stream — speech started, speech ended.
 #[derive(Debug, Clone)]
@@ -31,6 +32,18 @@ enum VadEvent {
 /// The orchestrator. Construct, then `run().await`.
 pub struct AssistantOrchestrator {
     cfg: Arc<AssistantConfig>,
+}
+
+/// Shared event bus made available to optional subscribers (e.g. the TUI).
+/// Returned by [`AssistantOrchestrator::event_bus`] before `run()` is called.
+#[derive(Clone)]
+pub struct EventBus {
+    /// Every VHT2-analyzed mic frame: RMS, entropy, flatness, power spectrum.
+    pub vad: broadcast::Sender<VadFrame>,
+    /// Session state transitions.
+    pub state: watch::Sender<SessionState>,
+    /// Finalized transcripts (after ASR).
+    pub transcripts: broadcast::Sender<String>,
 }
 
 impl AssistantOrchestrator {
@@ -51,6 +64,10 @@ impl AssistantOrchestrator {
         // ---- State channel (every task can read SessionState via watch) -----
         let (state_tx, state_rx) = watch::channel(SessionState::Idle);
 
+        // ---- Event bus broadcasts (subscribed by TUI later) -----------------
+        let (vad_frame_tx, _) = broadcast::channel::<VadFrame>(256);
+        let (transcript_tx, _) = broadcast::channel::<String>(32);
+
         // ---- Audio I/O ------------------------------------------------------
         let (audio_chunk_tx, audio_chunk_rx) = mpsc::channel::<AudioChunk>(64);
         let out_handle = audio_out::spawn(cfg.clone(), audio_chunk_rx)
@@ -58,16 +75,16 @@ impl AssistantOrchestrator {
 
         let (in_handle, mic_rx) = audio_in::spawn(cfg.clone()).context("spawning mic capture")?;
 
-        // Forward mic samples into the input ring buffer for waveform viz.
-        // (Phase 1 keeps this minimal — the TUI hook lands in Phase 5.)
-
-        // ---- Placeholder VAD + utterance assembly --------------------------
-        // For Phase 1 we use a simple RMS energy threshold over each 20 ms
-        // chunk with `speech_start_frames / speech_end_frames` hysteresis.
-        // Phase 3 swaps this for VHT2 spectral VAD.
+        // ---- VHT2 VAD + utterance assembly ---------------------------------
         let (vad_tx, vad_rx) = mpsc::channel::<VadEvent>(16);
         let (utterance_tx, utterance_rx) = mpsc::channel::<Vec<f32>>(4);
-        spawn_vad(cfg.clone(), mic_rx, vad_tx.clone(), utterance_tx.clone());
+        spawn_vad(
+            cfg.clone(),
+            mic_rx,
+            vad_tx.clone(),
+            utterance_tx.clone(),
+            vad_frame_tx.clone(),
+        );
 
         // ---- ASR → echo → TTS task -----------------------------------------
         spawn_pipeline(
@@ -75,6 +92,7 @@ impl AssistantOrchestrator {
             utterance_rx,
             audio_chunk_tx.clone(),
             state_tx.clone(),
+            transcript_tx.clone(),
         );
 
         // ---- Barge-in supervisor -------------------------------------------
@@ -128,74 +146,62 @@ impl AssistantOrchestrator {
     }
 }
 
-/// Energy-based VAD with hysteresis. Accumulates speech samples into one
-/// utterance and emits the utterance buffer when speech-end is detected.
+/// VHT2-driven VAD task. Accumulates mic samples into 32 ms windows, runs
+/// spectral analysis on each, broadcasts the [`VadFrame`] (for the TUI),
+/// emits Start/End events, and assembles complete utterances.
 fn spawn_vad(
     cfg: Arc<AssistantConfig>,
     mut mic_rx: mpsc::Receiver<PcmChunk>,
     vad_tx: mpsc::Sender<VadEvent>,
     utterance_tx: mpsc::Sender<Vec<f32>>,
+    frame_tx: broadcast::Sender<VadFrame>,
 ) {
     tokio::spawn(async move {
+        let mut vad = Vad::new(cfg.vad.clone());
         let mut in_speech = false;
-        let mut above = 0u8;
-        let mut below = 0u8;
-        let mut buf: Vec<f32> = Vec::with_capacity(cfg.audio.input_rate_hz as usize * 8);
-        let thr = cfg.vad.energy_threshold;
-        let start_n = cfg.vad.speech_start_frames;
-        let end_n = cfg.vad.speech_end_frames;
-        // Always keep a 200 ms pre-roll so we don't clip the first phoneme.
+        let mut utt: Vec<f32> = Vec::with_capacity(cfg.audio.input_rate_hz as usize * 8);
+        // Keep a 200 ms pre-roll so we don't clip the first phoneme.
         let preroll_samples = (cfg.audio.input_rate_hz as usize * 200) / 1000;
         let mut preroll: Vec<f32> = Vec::with_capacity(preroll_samples);
 
         while let Some(chunk) = mic_rx.recv().await {
-            let rms = rms(&chunk.samples);
-            let active = rms > thr;
-            if active {
-                above = above.saturating_add(1);
-                below = 0;
-            } else {
-                below = below.saturating_add(1);
-                above = 0;
-            }
-
+            // Maintain rolling pre-roll regardless of state — when speech
+            // starts we prepend whatever is in it.
             if !in_speech {
-                // Maintain rolling pre-roll.
                 if preroll.len() + chunk.samples.len() > preroll_samples {
                     let drop = preroll.len() + chunk.samples.len() - preroll_samples;
                     preroll.drain(..drop.min(preroll.len()));
                 }
                 preroll.extend_from_slice(&chunk.samples);
-
-                if above >= start_n {
-                    in_speech = true;
-                    buf.clear();
-                    buf.extend_from_slice(&preroll);
-                    preroll.clear();
-                    let _ = vad_tx.send(VadEvent::SpeechStart).await;
-                }
             } else {
-                buf.extend_from_slice(&chunk.samples);
-                if below >= end_n {
-                    in_speech = false;
-                    let utt = std::mem::take(&mut buf);
-                    let _ = vad_tx.send(VadEvent::SpeechEnd).await;
-                    if !utt.is_empty() {
-                        let _ = utterance_tx.send(utt).await;
+                utt.extend_from_slice(&chunk.samples);
+            }
+
+            for frame in vad.push(&chunk.samples) {
+                // Best-effort broadcast — no subscribers is fine.
+                let _ = frame_tx.send(frame.clone());
+
+                match (in_speech, frame.is_speech) {
+                    (false, true) => {
+                        in_speech = true;
+                        utt.clear();
+                        utt.extend_from_slice(&preroll);
+                        preroll.clear();
+                        let _ = vad_tx.send(VadEvent::SpeechStart).await;
                     }
+                    (true, false) => {
+                        in_speech = false;
+                        let captured = std::mem::take(&mut utt);
+                        let _ = vad_tx.send(VadEvent::SpeechEnd).await;
+                        if !captured.is_empty() {
+                            let _ = utterance_tx.send(captured).await;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     });
-}
-
-#[inline]
-fn rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    let sum: f32 = samples.iter().map(|s| s * s).sum();
-    (sum / samples.len() as f32).sqrt()
 }
 
 /// Phase-1 pipeline: utterance → ASR → echo → TTS → speaker.
@@ -204,6 +210,7 @@ fn spawn_pipeline(
     mut utterance_rx: mpsc::Receiver<Vec<f32>>,
     audio_chunk_tx: mpsc::Sender<AudioChunk>,
     state_tx: watch::Sender<SessionState>,
+    transcript_tx: broadcast::Sender<String>,
 ) {
     tokio::spawn(async move {
         while let Some(utt) = utterance_rx.recv().await {
@@ -227,6 +234,7 @@ fn spawn_pipeline(
             };
             let asr_ms = t0.elapsed().as_millis();
             info!(asr_ms, %transcript, "ASR done");
+            let _ = transcript_tx.send(transcript.clone());
 
             if transcript.trim().is_empty() {
                 let _ = state_tx.send(SessionState::Listening);

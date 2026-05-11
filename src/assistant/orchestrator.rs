@@ -466,15 +466,68 @@ async fn run_asr(
     Some(transcript)
 }
 
+/// Synthesize one piece of text and stream the resulting waveform into
+/// `audio_chunk_tx` as 20 ms chunks. Returns `true` on full success,
+/// `false` if synth produced nothing or the channel closed mid-stream.
+///
+/// Shared by `run_tts_and_stream` and the LLM→TTS worker so the chunking
+/// + error handling stays in one place.
+async fn stream_synth(
+    cfg: Arc<AssistantConfig>,
+    text: String,
+    audio_chunk_tx: &mpsc::Sender<AudioChunk>,
+) -> bool {
+    let cfg_clone = cfg.clone();
+    let text_clone = text.clone();
+    let synth = tokio::task::spawn_blocking(move || {
+        crate::assistant::tts::synthesize(&cfg_clone, &text_clone)
+    })
+    .await;
+    let samples = match synth {
+        Ok(Ok(s)) if !s.is_empty() => s,
+        Ok(Ok(_)) => return false,
+        Ok(Err(e)) => {
+            warn!(?e, text = %text, "TTS failed");
+            return false;
+        }
+        Err(e) => {
+            warn!(?e, "TTS task panicked");
+            return false;
+        }
+    };
+    let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
+    for window in samples.chunks(chunk) {
+        if audio_chunk_tx
+            .send(AudioChunk {
+                samples: window.to_vec(),
+            })
+            .await
+            .is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Generate via the LLM and concurrently dispatch TTS sentence-by-sentence.
 ///
-/// Tokens stream through `Shredder`; each completed `SentenceChunk` fires
-/// a TTS call on `spawn_blocking` whose audio chunks pump into the mixer
-/// in idx order. The user hears sentence 1 while the LLM is still
-/// generating sentence 3.
+/// Decoupled into two cooperating tasks so the LLM event loop never
+/// blocks on TTS:
 ///
-/// Returns `Some(())` if at least one chunk was synthesized, `None` if
-/// the LLM produced nothing usable.
+/// 1. **Token loop** (this function) — drains `LlmEvent`s from `event_rx`
+///    as fast as the LLM produces them, pushes pieces through the
+///    `Shredder`, and forwards each `SentenceChunk` to the TTS worker
+///    via a small bounded channel. Backpressure on the bounded channel
+///    is the only way TTS can ever slow this loop down, and it caps
+///    the queue at `TTS_QUEUE_DEPTH` chunks (~ a few KB).
+/// 2. **TTS worker** (`tts_worker_task`) — pulls chunks one at a time
+///    and runs `stream_synth` on each, in arrival order, so the user
+///    hears sentence N before sentence N+1.
+///
+/// Returns `Some(())` only when ≥ 1 chunk reached the mixer. Returns
+/// `None` if the LLM produced nothing usable OR every synth attempt
+/// failed — in that case the caller falls back to echo.
 #[cfg(feature = "llm")]
 async fn generate_and_stream(
     handle: &LlmHandle,
@@ -490,102 +543,104 @@ async fn generate_and_stream(
         return None;
     }
 
-    let mut shredder = Shredder::new(ShredderConfig::default());
-    let mut chunks_synthesized = 0u32;
-    let mut state_set_speaking = false;
+    /// Capacity of the chunk channel between the token loop and the TTS
+    /// worker. Small to keep memory bounded; large enough that brief
+    /// TTS hiccups don't immediately block the LLM loop.
+    const TTS_QUEUE_DEPTH: usize = 4;
 
-    let synth_and_push = |text: String,
-                          cfg: Arc<AssistantConfig>,
-                          tx: mpsc::Sender<AudioChunk>| async move {
-        let cfg_t = cfg.clone();
-        let text_clone = text.clone();
-        let synth = tokio::task::spawn_blocking(move || {
-            crate::assistant::tts::synthesize(&cfg_t, &text_clone)
-        })
-        .await;
-        match synth {
-            Ok(Ok(samples)) if !samples.is_empty() => {
-                let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
-                for window in samples.chunks(chunk) {
-                    if tx
-                        .send(AudioChunk {
-                            samples: window.to_vec(),
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return false;
-                    }
-                }
-                true
-            }
-            Ok(Ok(_)) => false,
-            Ok(Err(e)) => {
-                warn!(?e, text = %text, "TTS failed");
-                false
-            }
-            Err(e) => {
-                warn!(?e, "TTS task panicked");
-                false
-            }
-        }
+    let (chunk_tx, chunk_rx) = mpsc::channel::<crate::assistant::shredder::SentenceChunk>(
+        TTS_QUEUE_DEPTH,
+    );
+
+    // Spawn the TTS worker. Holds clones of the channels it needs; the
+    // task exits when chunk_tx is dropped (i.e. when the LLM loop ends).
+    let worker = {
+        let cfg = cfg.clone();
+        let audio_chunk_tx = audio_chunk_tx.clone();
+        let state_tx = state_tx.clone();
+        tokio::spawn(tts_worker_task(chunk_rx, cfg, audio_chunk_tx, state_tx))
     };
 
-    while let Some(evt) = event_rx.recv().await {
-        match evt {
-            LlmEvent::Token(piece) => {
+    // Token loop: drain LLM → shredder → bounded channel. Never await
+    // TTS work directly here.
+    let mut shredder = Shredder::new(ShredderConfig::default());
+    let mut llm_alive = true;
+    while llm_alive {
+        match event_rx.recv().await {
+            Some(LlmEvent::Token(piece)) => {
                 for chunk in shredder.push(&piece) {
-                    if !state_set_speaking {
-                        let _ = state_tx.send(SessionState::Speaking);
-                        state_set_speaking = true;
-                    }
-                    let text = chunk.text.to_string();
                     info!(
                         idx = chunk.idx,
                         boundary = ?chunk.boundary,
-                        chars = text.len(),
-                        "Sentence ready for TTS"
+                        chars = chunk.text.len(),
+                        "Sentence queued for TTS"
                     );
-                    if !synth_and_push(text, cfg.clone(), audio_chunk_tx.clone()).await {
-                        return Some(());
+                    if chunk_tx.send(chunk).await.is_err() {
+                        // Worker exited; nothing more we can do.
+                        llm_alive = false;
+                        break;
                     }
-                    chunks_synthesized += 1;
                 }
             }
-            LlmEvent::Done {
+            Some(LlmEvent::Done {
                 reason,
                 n_tokens,
                 total_ms,
                 ttft_ms,
-            } => {
+            }) => {
                 info!(?reason, n_tokens, total_ms, ttft_ms, "LLM done");
                 break;
             }
+            None => break,
         }
     }
-
-    // Flush any unterminated tail of the reply.
     if let Some(last) = shredder.flush() {
-        if !state_set_speaking {
-            let _ = state_tx.send(SessionState::Speaking);
-        }
-        let text = last.text.to_string();
         info!(
             idx = last.idx,
             boundary = ?last.boundary,
-            chars = text.len(),
-            "Final sentence flushed"
+            chars = last.text.len(),
+            "Final sentence queued for TTS"
         );
-        synth_and_push(text, cfg.clone(), audio_chunk_tx.clone()).await;
-        chunks_synthesized += 1;
+        let _ = chunk_tx.send(last).await;
     }
+    drop(chunk_tx); // signal end-of-stream to the worker
 
-    let _ = state_tx.send(SessionState::Listening);
+    // Wait for the worker to drain and report how many chunks landed.
+    let chunks_synthesized = worker.await.unwrap_or(0);
     if chunks_synthesized == 0 {
         None
     } else {
         Some(())
     }
+}
+
+/// Worker that consumes sentence chunks and synthesizes them in order.
+/// Returns the count of chunks that successfully reached the mixer.
+#[cfg(feature = "llm")]
+async fn tts_worker_task(
+    mut chunk_rx: mpsc::Receiver<crate::assistant::shredder::SentenceChunk>,
+    cfg: Arc<AssistantConfig>,
+    audio_chunk_tx: mpsc::Sender<AudioChunk>,
+    state_tx: watch::Sender<SessionState>,
+) -> u32 {
+    let mut count = 0u32;
+    let mut state_set_speaking = false;
+    while let Some(chunk) = chunk_rx.recv().await {
+        if !state_set_speaking {
+            let _ = state_tx.send(SessionState::Speaking);
+            state_set_speaking = true;
+        }
+        if stream_synth(cfg.clone(), chunk.text.to_string(), &audio_chunk_tx).await {
+            count += 1;
+        } else {
+            // Synth failure or mixer closed: give up.
+            break;
+        }
+    }
+    if state_set_speaking {
+        let _ = state_tx.send(SessionState::Listening);
+    }
+    count
 }
 
 async fn run_tts_and_stream(
@@ -594,36 +649,7 @@ async fn run_tts_and_stream(
     audio_chunk_tx: &mpsc::Sender<AudioChunk>,
     state_tx: &watch::Sender<SessionState>,
 ) {
-    let cfg_t = cfg.clone();
-    let text_owned = text.to_string();
-    let tts_result = tokio::task::spawn_blocking(move || {
-        crate::assistant::tts::synthesize(&cfg_t, &text_owned)
-    })
-    .await;
-    let audio = match tts_result {
-        Ok(Ok(a)) => a,
-        Ok(Err(e)) => {
-            warn!(?e, "TTS failed");
-            let _ = state_tx.send(SessionState::Listening);
-            return;
-        }
-        Err(e) => {
-            warn!(?e, "TTS task panicked");
-            let _ = state_tx.send(SessionState::Listening);
-            return;
-        }
-    };
-
     let _ = state_tx.send(SessionState::Speaking);
-    let chunk = (cfg.audio.output_rate_hz as usize * 20) / 1000;
-    for window in audio.chunks(chunk) {
-        if audio_chunk_tx
-            .send(AudioChunk { samples: window.to_vec() })
-            .await
-            .is_err()
-        {
-            break;
-        }
-    }
+    let _ = stream_synth(cfg.clone(), text.to_string(), audio_chunk_tx).await;
     let _ = state_tx.send(SessionState::Listening);
 }

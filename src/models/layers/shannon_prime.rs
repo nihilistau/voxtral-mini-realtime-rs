@@ -85,6 +85,52 @@ impl ShannonPrimeConfig {
     }
 }
 
+/// Shannon entropy `H = -Σ p log₂ p` of the normalized power distribution.
+///
+/// Treats `coeffs` as VHT2 (or any spectral) coefficients, squares them to
+/// get power, and normalizes to a probability distribution. The result is in
+/// bits — for an N-dim flat-spectrum input (white noise), H → log₂(N).
+/// Speech concentrates energy and pushes H below the noise ceiling.
+///
+/// Returns 0 if every coefficient is zero.
+pub fn spectral_entropy(coeffs: &[f32]) -> f32 {
+    if coeffs.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = coeffs.iter().map(|&c| (c as f64) * (c as f64)).sum();
+    if total <= 1e-20 {
+        return 0.0;
+    }
+    let mut h = 0.0f64;
+    for &c in coeffs {
+        let p = (c as f64) * (c as f64) / total;
+        if p > 1e-12 {
+            h -= p * p.log2();
+        }
+    }
+    h as f32
+}
+
+/// Spectral flatness ratio (geometric mean / arithmetic mean of power).
+///
+/// Returns a value in [0, 1]. Close to 1 = flat (noise-like), close to 0 =
+/// peaked (tonal / voiced speech).
+pub fn spectral_flatness(coeffs: &[f32]) -> f32 {
+    if coeffs.is_empty() {
+        return 0.0;
+    }
+    // Power; floor to avoid log(0).
+    let powers: Vec<f64> = coeffs.iter().map(|&c| ((c as f64) * (c as f64)).max(1e-20)).collect();
+    let n = powers.len() as f64;
+    let log_mean: f64 = powers.iter().map(|p| p.ln()).sum::<f64>() / n;
+    let geo_mean = log_mean.exp();
+    let arith_mean: f64 = powers.iter().sum::<f64>() / n;
+    if arith_mean <= 0.0 {
+        return 0.0;
+    }
+    (geo_mean / arith_mean) as f32
+}
+
 /// Apply VHT2 in-place on a 1D float slice.
 ///
 /// Supports both power-of-2 and composite dimensions:
@@ -248,7 +294,7 @@ fn factorize_vht2(mut n: usize) -> Vec<usize> {
     let mut factors = Vec::new();
 
     // Extract factor of 3 first (processed at largest stride)
-    while n % 3 == 0 {
+    while n.is_multiple_of(3) {
         factors.push(3);
         n /= 3;
     }

@@ -3,8 +3,11 @@
 //! ```text
 //! voxtral transcribe --audio file.wav [--gguf model.gguf | --model dir/]
 //! voxtral speak --text "Hello" --voice casual_female [--gguf model.gguf | --model dir/]
+//! voxtral assistant   (requires --features assistant)
 //! ```
 
+#[cfg(feature = "assistant")]
+mod assistant;
 mod speak;
 mod transcribe;
 
@@ -25,6 +28,9 @@ enum Command {
     Transcribe(transcribe::Args),
     /// Synthesize speech from text (TTS)
     Speak(speak::Args),
+    /// Real-time conversational assistant (requires --features assistant)
+    #[cfg(feature = "assistant")]
+    Assistant(assistant::Args),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -38,5 +44,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Transcribe(args) => transcribe::run(args),
         Command::Speak(args) => speak::run(args),
+        #[cfg(feature = "assistant")]
+        Command::Assistant(args) => assistant::run(args),
     }
 }
